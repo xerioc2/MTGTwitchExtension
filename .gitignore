@@ -16,6 +16,9 @@ venv/
 # Builds / dists
 dist/
 build/
+target/
+node_modules/
+coverage/
 *.egg-info/
 
 # OS junk
