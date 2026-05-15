@@ -15,6 +15,7 @@
     "lucide-react": "latest"
   },
   "devDependencies": {
+    "@eslint/js": "latest",
     "@vitejs/plugin-react": "latest",
     "eslint": "latest",
     "eslint-plugin-react-hooks": "latest",

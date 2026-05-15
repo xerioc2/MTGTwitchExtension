@@ -23,17 +23,17 @@ public class MtgoLogParserService {
     };
 
     private static final Pattern[] ACTOR_MOVE_PATTERNS = {
-            Pattern.compile("(?i)^.+?\\s+(?:puts|moves|returns)\\s+(.+?)\\s+(?:from|out of)\\s+(?:the\\s+)?(.+?)\\s+(?:to|into|onto)\\s+(?:the\\s+)?(.+?)[\\.!]?$")
+            Pattern.compile("(?i)^.+?\\s+(?:puts|moves|returns)\\s+(.+)\\s+(?:from|out of)\\s+(?:the\\s+)?(.+?)\\s+(?:to|into|onto)\\s+(?:the\\s+)?(.+?)[\\.!]?$")
     };
 
     private static final Pattern[] ACTOR_REVERSED_MOVE_PATTERNS = {
-            Pattern.compile("(?i)^.+?\\s+(?:puts|moves|returns)\\s+(.+?)\\s+(?:to|into|onto)\\s+(?:the\\s+)?(.+?)\\s+from\\s+(?:the\\s+)?(.+?)[\\.!]?$")
+            Pattern.compile("(?i)^.+?\\s+(?:puts|moves|returns)\\s+(.+)\\s+(?:to|into|onto)\\s+(?:the\\s+)?(.+?)\\s+from\\s+(?:the\\s+)?(.+?)[\\.!]?$")
     };
 
     private static final Pattern[] DESTINATION_PATTERNS = {
             Pattern.compile("(?i)^(.+?)\\s+(?:is\\s+)?(?:put|moved|returned)\\s+(?:to|into|onto)\\s+(?:the\\s+)?(.+?)[\\.!]?$"),
             Pattern.compile("(?i)^(.+?)\\s+(?:enters|entered)\\s+(?:the\\s+)?(.+?)[\\.!]?$"),
-            Pattern.compile("(?i)^.+?\\s+(?:puts|moves|returns)\\s+(.+?)\\s+(?:to|into|onto)\\s+(?:the\\s+)?(.+?)[\\.!]?$"),
+            Pattern.compile("(?i)^.+?\\s+(?:puts|moves|returns)\\s+(.+)\\s+(?:to|into|onto)\\s+(?:the\\s+)?(.+?)[\\.!]?$"),
             Pattern.compile("(?i)^(.+?)\\s+(?:is\\s+)?exiled[\\.!]?$"),
             Pattern.compile("(?i)^(.+?)\\s+(?:is\\s+)?discarded[\\.!]?$")
     };
@@ -141,6 +141,7 @@ public class MtgoLogParserService {
         }
 
         return switch (action) {
+            case "casts" -> Optional.of(new CardZoneEvent(cardName, Zone.HAND, Zone.BATTLEFIELD, rawLine));
             case "plays" -> Optional.of(new CardZoneEvent(cardName, Zone.HAND, Zone.BATTLEFIELD, rawLine));
             case "discards" -> Optional.of(new CardZoneEvent(cardName, Zone.HAND, Zone.GRAVEYARD, rawLine));
             case "exiles" -> Optional.of(new CardZoneEvent(cardName, null, Zone.EXILE, rawLine));
