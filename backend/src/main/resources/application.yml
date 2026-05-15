@@ -14,6 +14,8 @@ management:
 mtgo:
   log:
     path: ${MTGO_LOG_PATH:}
+  debug:
+    raw-log: ${MTGO_DEBUG_RAW_LOG:false}
 
 twitch:
   client-id: ${TWITCH_CLIENT_ID:}

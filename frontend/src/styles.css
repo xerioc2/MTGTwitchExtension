@@ -69,6 +69,30 @@ textarea {
   color: #7bd3c8;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.icon-button {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 10px;
+  border: 1px solid rgba(247, 244, 238, 0.16);
+  border-radius: 8px;
+  color: #f7f4ee;
+  background: rgba(247, 244, 238, 0.06);
+  cursor: pointer;
+}
+
+.icon-button:disabled {
+  cursor: wait;
+  opacity: 0.7;
+}
+
 .connection-badge {
   flex: 0 0 auto;
   display: inline-flex;
@@ -103,6 +127,18 @@ textarea {
   color: #d6d0c7;
   border-bottom: 1px solid rgba(247, 244, 238, 0.1);
   font-size: 0.9rem;
+}
+
+.state-meta > div {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.log-path {
+  color: #a9a197;
+  overflow-wrap: anywhere;
 }
 
 .state-error {
@@ -186,6 +222,11 @@ p {
   .viewer-header {
     align-items: flex-start;
     flex-direction: column;
+  }
+
+  .header-actions {
+    width: 100%;
+    justify-content: space-between;
   }
 
   .state-meta {

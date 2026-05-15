@@ -1,7 +1,9 @@
-import { Activity, CircleAlert, RadioTower } from 'lucide-react';
+import { Activity, CircleAlert, RadioTower, RefreshCw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 
 const websocketUrl = import.meta.env.VITE_BACKEND_WS_URL ?? 'ws://localhost:8080/ws/game-state';
+const backendApiUrl = import.meta.env.VITE_BACKEND_API_URL
+  ?? websocketUrl.replace(/^ws/, 'http').replace('/ws/game-state', '');
 const emptyGameState = {
   hand: [],
   battlefield: [],
@@ -21,6 +23,9 @@ export default function App() {
   const [connectionState, setConnectionState] = useState('connecting');
   const [gameState, setGameState] = useState(emptyGameState);
   const [lastError, setLastError] = useState('');
+  const [resolvedLogPath, setResolvedLogPath] = useState('');
+  const [rescanStatus, setRescanStatus] = useState('');
+  const [isRescanning, setIsRescanning] = useState(false);
   const zoneGridRef = useRef(null);
 
   useEffect(() => {
@@ -71,6 +76,31 @@ export default function App() {
     ? new Date(gameState.updatedAt).toLocaleTimeString()
     : 'No parsed events yet';
 
+  async function handleReconnect() {
+    setIsRescanning(true);
+    setRescanStatus('');
+
+    try {
+      const response = await fetch(`${backendApiUrl}/api/rescan-log`, {
+        method: 'POST'
+      });
+      const result = await response.json();
+
+      if (!response.ok || !result.watching) {
+        setResolvedLogPath(result.path ?? '');
+        setRescanStatus(result.message ?? 'No MTGO log file was found.');
+        return;
+      }
+
+      setResolvedLogPath(result.path);
+      setRescanStatus(result.message ?? 'Reconnected to MTGO log.');
+    } catch {
+      setRescanStatus('Unable to contact the backend rescan endpoint.');
+    } finally {
+      setIsRescanning(false);
+    }
+  }
+
   return (
     <main className="extension-shell">
       <section className="state-viewer" aria-labelledby="extension-title">
@@ -83,18 +113,29 @@ export default function App() {
             </div>
           </div>
 
-          <div className={`connection-badge ${connectionState}`}>
-            {isConnected ? (
-              <Activity aria-hidden="true" size={16} />
-            ) : (
-              <CircleAlert aria-hidden="true" size={16} />
-            )}
-            <span>{connectionState}</span>
+          <div className="header-actions">
+            <button className="icon-button" type="button" onClick={handleReconnect} disabled={isRescanning}>
+              <RefreshCw aria-hidden="true" size={16} />
+              <span>{isRescanning ? 'Reconnecting' : 'Reconnect'}</span>
+            </button>
+
+            <div className={`connection-badge ${connectionState}`}>
+              {isConnected ? (
+                <Activity aria-hidden="true" size={16} />
+              ) : (
+                <CircleAlert aria-hidden="true" size={16} />
+              )}
+              <span>{connectionState}</span>
+            </div>
           </div>
         </header>
 
         <div className="state-meta">
-          <span>Updated: {updatedAt}</span>
+          <div>
+            <span>Updated: {updatedAt}</span>
+            {resolvedLogPath && <span className="log-path">Log: {resolvedLogPath}</span>}
+          </div>
+          {rescanStatus && <span>{rescanStatus}</span>}
           {lastError && <span className="state-error">{lastError}</span>}
         </div>
 
