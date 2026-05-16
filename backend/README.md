@@ -8,10 +8,14 @@ Spring Boot scaffold for the MTGO Twitch Extension backend.
 - Spring WebSocket for real-time state delivery
 - MTGO log file watcher that tails newly appended lines from `MTGO_LOG_PATH`
 - MTGO log parser for hand, battlefield, graveyard, and exile zone events
+- 2-second polling fallback for MTGO log writes that do not trigger filesystem watch events
+- Twitch deck log capture for raw MTGO catalog IDs in the current game state
+- Twitch game status update parsing for player life totals and catalog-id zone snapshots
 - Game state WebSocket endpoint at `/ws/game-state`
 - Actuator health/info endpoints
 
-The parser is an initial heuristic implementation for common MTGO-style zone log lines.
+The parser prefers the structured `Twitch Info|Game Play Status Update` payload when MTGO emits it,
+then falls back to the initial heuristic implementation for common MTGO-style zone log lines.
 
 ## Configuration
 

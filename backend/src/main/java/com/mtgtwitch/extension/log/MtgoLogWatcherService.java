@@ -21,6 +21,8 @@ import java.nio.file.WatchService;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 
 @Service
@@ -32,10 +34,12 @@ public class MtgoLogWatcherService {
     private final MtgoLogDiscoveryService mtgoLogDiscoveryService;
     private final MtgoLogParserService mtgoLogParserService;
     private final ExecutorService executorService;
+    private final ScheduledExecutorService pollingExecutorService;
 
     private volatile boolean running;
     private WatchService watchService;
     private Future<?> watcherTask;
+    private ScheduledFuture<?> pollingTask;
     private Path logPath;
     private long lastKnownPosition;
 
@@ -49,6 +53,11 @@ public class MtgoLogWatcherService {
         this.mtgoLogParserService = mtgoLogParserService;
         this.executorService = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "mtgo-log-watcher");
+            thread.setDaemon(true);
+            return thread;
+        });
+        this.pollingExecutorService = Executors.newSingleThreadScheduledExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "mtgo-log-poller");
             thread.setDaemon(true);
             return thread;
         });
@@ -71,9 +80,11 @@ public class MtgoLogWatcherService {
     public synchronized void stop() {
         stopCurrentWatcher();
         executorService.shutdownNow();
+        pollingExecutorService.shutdownNow();
 
         try {
-            if (!executorService.awaitTermination(2, TimeUnit.SECONDS)) {
+            if (!executorService.awaitTermination(2, TimeUnit.SECONDS)
+                    || !pollingExecutorService.awaitTermination(2, TimeUnit.SECONDS)) {
                 log.warn("MTGO log watcher did not stop within the shutdown timeout.");
             }
         } catch (InterruptedException exception) {
@@ -115,12 +126,18 @@ public class MtgoLogWatcherService {
             );
             running = true;
             watcherTask = executorService.submit(() -> watchForChanges(activeWatchService, activeLogPath));
+            pollingTask = pollingExecutorService.scheduleAtFixedRate(
+                    () -> readNewLines(activeLogPath),
+                    2,
+                    2,
+                    TimeUnit.SECONDS
+            );
 
             if (!Files.exists(logPath)) {
                 log.error("MTGO log file does not exist yet: {}. Watching {} for the file to be created.", logPath, parentDirectory);
             }
 
-            log.info("MTGO log watcher started for {}", logPath);
+            log.info("MTGO log watcher started for {} with 2-second polling fallback.", logPath);
             return new LogWatchStatus(logPath.toString(), true, "MTGO log watcher started.");
         } catch (IOException exception) {
             log.error("Failed to start MTGO log watcher for {}", logPath, exception);
@@ -149,8 +166,14 @@ public class MtgoLogWatcherService {
             }
         }
 
+        ScheduledFuture<?> activePollingTask = pollingTask;
+        if (activePollingTask != null) {
+            activePollingTask.cancel(true);
+        }
+
         watchService = null;
         watcherTask = null;
+        pollingTask = null;
     }
 
     private void watchForChanges(WatchService activeWatchService, Path activeLogPath) {
@@ -187,7 +210,7 @@ public class MtgoLogWatcherService {
         }
     }
 
-    private void readNewLines(Path activeLogPath) {
+    private synchronized void readNewLines(Path activeLogPath) {
         if (!Files.exists(activeLogPath)) {
             lastKnownPosition = 0;
             return;

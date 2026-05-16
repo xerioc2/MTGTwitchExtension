@@ -1,5 +1,6 @@
 import { Activity, CircleAlert, RadioTower, RefreshCw } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
+import DebugPage from './DebugPage.jsx';
 
 const websocketUrl = import.meta.env.VITE_BACKEND_WS_URL ?? 'ws://localhost:8080/ws/game-state';
 const backendApiUrl = import.meta.env.VITE_BACKEND_API_URL
@@ -20,6 +21,14 @@ const zones = [
 ];
 
 export default function App() {
+  if (window.location.pathname === '/debug') {
+    return <DebugPage />;
+  }
+
+  return <ExtensionPanel />;
+}
+
+function ExtensionPanel() {
   const [connectionState, setConnectionState] = useState('connecting');
   const [gameState, setGameState] = useState(emptyGameState);
   const [lastError, setLastError] = useState('');

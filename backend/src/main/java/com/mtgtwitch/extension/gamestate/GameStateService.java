@@ -13,13 +13,18 @@ import java.util.Map;
 public class GameStateService {
 
     private final Map<Zone, List<String>> zones = new EnumMap<>(Zone.class);
+    private final Map<Zone, List<GameCard>> zoneCards = new EnumMap<>(Zone.class);
     private final GameStateBroadcaster gameStateBroadcaster;
+    private Long gameId;
+    private List<Integer> deckCatalogIds = List.of();
+    private List<PlayerState> players = List.of();
 
     public GameStateService(GameStateBroadcaster gameStateBroadcaster) {
         this.gameStateBroadcaster = gameStateBroadcaster;
 
         for (Zone zone : Zone.values()) {
             zones.put(zone, new ArrayList<>());
+            zoneCards.put(zone, new ArrayList<>());
         }
     }
 
@@ -39,12 +44,42 @@ public class GameStateService {
         return gameState;
     }
 
+    public synchronized GameState apply(GameStatusEvent event) {
+        gameId = event.gameId();
+        players = List.copyOf(event.players());
+        clearTrackedZones();
+
+        event.cards().stream()
+                .filter(card -> card.owner() == 1)
+                .forEach(this::addStatusCard);
+
+        GameState gameState = snapshot();
+        gameStateBroadcaster.broadcast(gameState);
+        return gameState;
+    }
+
+    public synchronized GameState updateDeckCatalogIds(DeckCatalogEvent event) {
+        gameId = event.gameId();
+        deckCatalogIds = List.copyOf(event.deckCatalogIds());
+
+        GameState gameState = snapshot();
+        gameStateBroadcaster.broadcast(gameState);
+        return gameState;
+    }
+
     public synchronized GameState snapshot() {
         return new GameState(
                 List.copyOf(zones.get(Zone.HAND)),
                 List.copyOf(zones.get(Zone.BATTLEFIELD)),
                 List.copyOf(zones.get(Zone.GRAVEYARD)),
                 List.copyOf(zones.get(Zone.EXILE)),
+                List.copyOf(zoneCards.get(Zone.HAND)),
+                List.copyOf(zoneCards.get(Zone.BATTLEFIELD)),
+                List.copyOf(zoneCards.get(Zone.GRAVEYARD)),
+                List.copyOf(zoneCards.get(Zone.EXILE)),
+                List.copyOf(players),
+                gameId,
+                List.copyOf(deckCatalogIds),
                 Instant.now()
         );
     }
@@ -55,5 +90,21 @@ public class GameStateService {
                 entry.getValue().remove(cardName);
             }
         }
+    }
+
+    private void clearTrackedZones() {
+        for (Zone zone : Zone.values()) {
+            zones.get(zone).clear();
+            zoneCards.get(zone).clear();
+        }
+    }
+
+    private void addStatusCard(GameCard card) {
+        Zone.fromLogText(card.actualZone())
+                .filter(zone -> zone != Zone.EXILE || card.zone().equalsIgnoreCase("Exile"))
+                .ifPresent(zone -> {
+                    zoneCards.get(zone).add(card);
+                    zones.get(zone).add(card.displayName());
+                });
     }
 }
