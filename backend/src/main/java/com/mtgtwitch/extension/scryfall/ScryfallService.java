@@ -20,6 +20,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ScryfallService {
 
     private static final String SCRYFALL_MTGO_CARD_URL = "https://api.scryfall.com/cards/mtgo/{catalogId}";
+    private static final String SCRYFALL_MULTIVERSE_CARD_URL = "https://api.scryfall.com/cards/multiverse/{catalogId}";
 
     private final RestTemplate restTemplate;
     private final Duration requestDelay;
@@ -52,17 +53,18 @@ public class ScryfallService {
             return Optional.of(cachedCard);
         }
 
-        Optional<ScryfallCard> fetchedCard = fetchCardFromScryfall(catalogId);
+        Optional<ScryfallCard> fetchedCard = fetchCardFromScryfall(catalogId, SCRYFALL_MTGO_CARD_URL)
+                .or(() -> fetchCardFromScryfall(catalogId, SCRYFALL_MULTIVERSE_CARD_URL));
         fetchedCard.ifPresent(card -> cache.put(catalogId, card));
         return fetchedCard;
     }
 
-    private Optional<ScryfallCard> fetchCardFromScryfall(int catalogId) {
+    private Optional<ScryfallCard> fetchCardFromScryfall(int catalogId, String url) {
         throttleRequests();
 
         try {
             ScryfallApiCard apiCard = restTemplate.getForObject(
-                    SCRYFALL_MTGO_CARD_URL,
+                    url,
                     ScryfallApiCard.class,
                     catalogId
             );
@@ -79,7 +81,7 @@ public class ScryfallService {
                     apiCard.oracleText(),
                     apiCard.imageUris() == null ? null : apiCard.imageUris().normal()
             ));
-        } catch (HttpClientErrorException.NotFound exception) {
+        } catch (HttpClientErrorException.BadRequest | HttpClientErrorException.NotFound exception) {
             return Optional.empty();
         } catch (RestClientException exception) {
             throw new ScryfallServiceException("Failed to fetch Scryfall card for MTGO catalog id " + catalogId, exception);
