@@ -10,6 +10,8 @@ __pycache__/
 # Environments
 .env
 *.env
+.env.local
+.env*.local
 .venv/
 venv/
 
@@ -20,6 +22,7 @@ target/
 node_modules/
 coverage/
 *.egg-info/
+frontend/magiccontent-*.zip
 
 # OS junk
 .DS_Store

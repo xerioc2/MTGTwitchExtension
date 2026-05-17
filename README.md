@@ -20,7 +20,7 @@ and oracle text on hover.
 - Reconnect button handles MTGO client updates mid-stream
 - Raw debug view at `/debug` for local development
 
-## Structure
+## For Streamers
 
 - `backend/` — Java 17 + Spring Boot 3 backend. File watching, 
   WebSocket broadcasting, MTGO log parsing, Scryfall API integration.

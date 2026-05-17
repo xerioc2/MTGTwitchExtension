@@ -1,10 +1,8 @@
-import { Activity, ChevronDown, ChevronRight, CircleAlert, RefreshCw } from 'lucide-react';
+import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import DebugPage from './DebugPage.jsx';
 
-const websocketUrl = import.meta.env.VITE_BACKEND_WS_URL ?? 'ws://localhost:8080/ws/game-state';
-const backendApiUrl = import.meta.env.VITE_BACKEND_API_URL
-  ?? websocketUrl.replace(/^ws/, 'http').replace('/ws/game-state', '');
+const websocketUrl = 'ws://localhost:8080/ws/game-state';
+const backendApiUrl = 'http://localhost:8080';
 const emptyGameState = {
   hand: [],
   battlefield: [],
@@ -15,8 +13,7 @@ const emptyGameState = {
   graveyardCards: [],
   exileCards: [],
   deckCatalogIds: [],
-  gameId: null,
-  updatedAt: null
+  gameId: null
 };
 
 const zones = [
@@ -35,18 +32,9 @@ const pipColors = {
   C: '#c7ced1'
 };
 
-export default function App() {
-  if (window.location.pathname === '/debug') {
-    return <DebugPage />;
-  }
-
-  return <ExtensionPanel />;
-}
-
-function ExtensionPanel() {
+export default function DebugPage() {
   const [connectionState, setConnectionState] = useState('connecting');
   const [gameState, setGameState] = useState(emptyGameState);
-  const [lastError, setLastError] = useState('');
   const [rescanStatus, setRescanStatus] = useState('');
   const [isRescanning, setIsRescanning] = useState(false);
   const [collapsedZones, setCollapsedZones] = useState({});
@@ -88,9 +76,8 @@ function ExtensionPanel() {
     socket.addEventListener('message', (event) => {
       try {
         setGameState({ ...emptyGameState, ...JSON.parse(event.data) });
-        setLastError('');
       } catch {
-        setLastError('Invalid game-state JSON.');
+        setConnectionState('error');
       }
     });
 
@@ -141,6 +128,12 @@ function ExtensionPanel() {
       }
     }
 
+    for (const catalogId of gameState.deckCatalogIds ?? []) {
+      if (catalogId) {
+        catalogIds.add(catalogId);
+      }
+    }
+
     return Array.from(catalogIds);
   }, [gameState]);
 
@@ -169,8 +162,6 @@ function ExtensionPanel() {
     };
   }, [cardDetailsByCatalogId, catalogIdsToResolve, failedCatalogIds, fetchCardDetails]);
 
-  const isConnected = connectionState === 'connected';
-
   async function handleReconnect() {
     setIsRescanning(true);
     setRescanStatus('');
@@ -180,9 +171,11 @@ function ExtensionPanel() {
         method: 'POST'
       });
       const result = await response.json();
-      setRescanStatus(result.watching ? 'Reconnected' : result.message ?? 'No log found');
+      setRescanStatus(result.path
+        ? `${result.message ?? 'Rescan complete'}: ${result.path}`
+        : result.message ?? 'No MTGO log file was found.');
     } catch {
-      setRescanStatus('Backend unavailable');
+      setRescanStatus('Unable to contact the backend rescan endpoint.');
     } finally {
       setIsRescanning(false);
     }
@@ -199,8 +192,8 @@ function ExtensionPanel() {
     const rect = event.currentTarget.getBoundingClientRect();
     setHoveredCard({
       ...card,
-      top: Math.min(rect.top, window.innerHeight - 260),
-      left: Math.min(rect.right + 8, window.innerWidth - 236),
+      top: rect.top,
+      left: rect.right + 12,
       loading: !cardDetailsByCatalogId[card.catalogId]
     });
 
@@ -220,67 +213,66 @@ function ExtensionPanel() {
     }
   }
 
+  function handleCardMouseLeave() {
+    setHoveredCard(null);
+  }
+
   return (
-    <main className="extension-shell">
-      <section className="extension-panel" aria-labelledby="extension-title">
-        <header className="extension-header">
+    <main className="debug-shell">
+      <section className="debug-panel" aria-labelledby="debug-title">
+        <header className="debug-header">
           <div>
-            <h1 id="extension-title">MTGO Zones</h1>
-            <p>Game {gameState.gameId ?? 'none'}</p>
+            <h1 id="debug-title">MTGO Debug Decklist</h1>
+            <p>Game {gameState.gameId ?? 'none'} · Deck IDs {gameState.deckCatalogIds?.length ?? 0}</p>
           </div>
 
-          <div className="extension-actions">
-            <button className="extension-icon-button" type="button" onClick={handleReconnect} disabled={isRescanning}>
-              <RefreshCw aria-hidden="true" size={14} />
-              <span>{isRescanning ? '...' : 'Reconnect'}</span>
+          <div className="debug-actions">
+            <span className={`debug-status ${connectionState}`}>{connectionState}</span>
+            <button className="debug-reconnect" type="button" onClick={handleReconnect} disabled={isRescanning}>
+              <RefreshCw aria-hidden="true" size={15} />
+              <span>{isRescanning ? 'Reconnecting' : 'Reconnect'}</span>
             </button>
-
-            <span className={`extension-status ${connectionState}`}>
-              {isConnected ? <Activity aria-hidden="true" size={13} /> : <CircleAlert aria-hidden="true" size={13} />}
-              {connectionState}
-            </span>
           </div>
         </header>
 
-        {(rescanStatus || lastError) && (
-          <div className="extension-message">
-            {lastError || rescanStatus}
-          </div>
-        )}
+        {rescanStatus && <div className="debug-rescan">{rescanStatus}</div>}
 
-        <div className="extension-zone-list" aria-live="polite">
+        <div className="debug-zone-list">
           {zones.map((zone) => {
             const cards = zoneCards[zone.key] ?? [];
             const isCollapsed = collapsedZones[zone.key];
 
             return (
-              <section className="extension-zone" key={zone.key}>
-                <button className="extension-zone-header" type="button" onClick={() => toggleZone(zone.key)}>
-                  {isCollapsed ? <ChevronRight aria-hidden="true" size={15} /> : <ChevronDown aria-hidden="true" size={15} />}
+              <section className="debug-zone" key={zone.key}>
+                <button className="debug-zone-header" type="button" onClick={() => toggleZone(zone.key)}>
+                  {isCollapsed ? <ChevronRight aria-hidden="true" size={16} /> : <ChevronDown aria-hidden="true" size={16} />}
                   <span>{zone.label}</span>
-                  <span className="extension-count">{countCards(cards)}</span>
+                  <span className="debug-count">{countCards(cards)}</span>
                 </button>
 
                 {!isCollapsed && (
-                  <div className="extension-card-list">
+                  <div className="debug-card-list">
                     {cards.length === 0 ? (
-                      <div className="extension-empty">No cards</div>
+                      <div className="debug-empty">No cards detected</div>
                     ) : (
                       cards.map((card) => (
                         <button
-                          className="extension-card-row"
+                          className="debug-card-row"
                           type="button"
                           key={`${zone.key}-${card.catalogId}-${card.name}`}
                           onMouseEnter={(event) => handleCardMouseEnter(card, event)}
-                          onMouseLeave={() => setHoveredCard(null)}
+                          onMouseLeave={handleCardMouseLeave}
                         >
-                          <span className="extension-quantity">{card.quantity}</span>
-                          <span className="extension-card-main">
-                            <span className="extension-card-title">
+                          <span className="debug-quantity">{card.quantity}</span>
+                          <span className="debug-card-main">
+                            <span className="debug-card-title">
                               <span>{card.name}</span>
                               <ManaCost manaCost={card.manaCost} />
                             </span>
-                            <span className="extension-card-subtitle">{card.typeLine || `Catalog ID ${card.catalogId}`}</span>
+                            <span className="debug-card-subtitle">
+                              <span className="debug-rarity-dot" />
+                              {card.typeLine || `Catalog ID ${card.catalogId}`}
+                            </span>
                           </span>
                         </button>
                       ))
@@ -307,17 +299,17 @@ function ManaCost({ manaCost }) {
 
   const symbols = manaCost.match(/\{[^}]+}/g);
   if (!symbols) {
-    return <span className="extension-mana-text">{manaCost}</span>;
+    return <span className="debug-mana-text">{manaCost}</span>;
   }
 
   return (
-    <span className="extension-mana" aria-label={manaCost}>
+    <span className="debug-mana" aria-label={manaCost}>
       {symbols.map((symbol, index) => {
         const value = symbol.replace(/[{}]/g, '');
         const color = pipColors[value] ?? '#e4ded4';
 
         return (
-          <span className="extension-pip" style={{ backgroundColor: color }} key={`${symbol}-${index}`}>
+          <span className="debug-pip" style={{ backgroundColor: color }} key={`${symbol}-${index}`}>
             {value}
           </span>
         );
@@ -331,19 +323,19 @@ function CardPreview({ card, cachedDetails }) {
   const imageUri = details.imageUrl || details.normalImageUri || details.imageUri;
 
   return (
-    <aside className="extension-card-preview" style={{ top: card.top, left: card.left }}>
+    <aside className="debug-card-preview" style={{ top: card.top, left: card.left }}>
       {imageUri ? (
         <img src={imageUri} alt={details.name} />
       ) : (
-        <div className="extension-card-image-placeholder">Image pending</div>
+        <div className="debug-card-image-placeholder">Image pending</div>
       )}
-      <div className="extension-card-preview-body">
-        <div className="extension-card-preview-title">
+      <div className="debug-card-preview-body">
+        <div className="debug-card-preview-title">
           <strong>{details.name}</strong>
           <ManaCost manaCost={details.manaCost} />
         </div>
         <p>{details.typeLine || `Catalog ID ${details.catalogId}`}</p>
-        <p>{details.oracleText || (details.loading ? 'Loading Scryfall card data...' : 'Card details unavailable')}</p>
+        <p>{details.oracleText || (details.loading ? 'Loading Scryfall card data...' : 'TODO: GET /api/cards/{catalogId}')}</p>
       </div>
     </aside>
   );
@@ -413,7 +405,7 @@ function buildPlaceholderCard(card) {
     name: card.name,
     normalImageUri: '',
     imageUri: '',
-    oracleText: 'Card details unavailable',
+    oracleText: 'TODO: GET /api/cards/{catalogId}',
     manaCost: card.manaCost || '',
     typeLine: card.typeLine || `Catalog ID ${card.catalogId}`
   };

@@ -8,6 +8,13 @@ public record GameState(
         List<String> battlefield,
         List<String> graveyard,
         List<String> exile,
+        List<GameCard> handCards,
+        List<GameCard> battlefieldCards,
+        List<GameCard> graveyardCards,
+        List<GameCard> exileCards,
+        List<PlayerState> players,
+        Long gameId,
+        List<Integer> deckCatalogIds,
         Instant updatedAt
 ) {
 }
