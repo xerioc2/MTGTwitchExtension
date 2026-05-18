@@ -18,6 +18,28 @@ body {
   min-height: 100vh;
 }
 
+.overlay-fallback-shell {
+  min-height: 100vh;
+  display: flex;
+  justify-content: flex-end;
+  background: transparent;
+}
+
+.overlay-fallback-panel {
+  width: 320px;
+  min-height: 100vh;
+  padding: 12px;
+  border-left: 1px solid rgba(88, 80, 65, 0.9);
+  background: rgba(24, 23, 19, 0.94);
+  color: #f7f4ee;
+  box-shadow: -14px 0 38px rgba(0, 0, 0, 0.42);
+}
+
+.overlay-fallback-panel p {
+  color: #aaa194;
+  font-size: 0.82rem;
+}
+
 button,
 input,
 select,
@@ -34,6 +56,37 @@ textarea {
   background: #10100f;
 }
 
+.extension-overlay-shell {
+  justify-content: flex-end;
+  background: transparent;
+  pointer-events: none;
+}
+
+.extension-overlay-shell::before {
+  content: "MTGO";
+  position: fixed;
+  top: 42%;
+  right: 0;
+  z-index: 1;
+  width: 34px;
+  height: 92px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(88, 80, 65, 0.9);
+  border-right: 0;
+  border-radius: 6px 0 0 6px;
+  background: rgba(24, 23, 19, 0.92);
+  color: #f7f4ee;
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  writing-mode: vertical-rl;
+  text-orientation: mixed;
+  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.34);
+  pointer-events: auto;
+}
+
 .extension-panel {
   width: min(100%, 320px);
   min-height: 100vh;
@@ -42,6 +95,27 @@ textarea {
   border-right: 1px solid #34302a;
   background: #181713;
   overflow: hidden;
+}
+
+.extension-overlay-shell .extension-panel {
+  width: 320px;
+  margin-left: auto;
+  transform: translateX(286px);
+  border-right: 0;
+  border-left: 1px solid rgba(88, 80, 65, 0.9);
+  background: rgba(24, 23, 19, 0.94);
+  box-shadow: -14px 0 38px rgba(0, 0, 0, 0.42);
+  pointer-events: auto;
+  transition: transform 160ms ease;
+}
+
+.extension-overlay-shell:hover .extension-panel,
+.extension-overlay-shell .extension-panel:focus-within {
+  transform: translateX(0);
+}
+
+.extension-overlay-shell .extension-card-preview {
+  pointer-events: auto;
 }
 
 .extension-header {

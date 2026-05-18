@@ -137,4 +137,24 @@ class MtgoLogParserServiceTests {
         assertThat(gameState.handCards()).extracting(GameCard::catalogId).containsExactly(78632);
         assertThat(gameState.players()).extracting(PlayerState::life).containsExactly(19, 16);
     }
+
+    @Test
+    void appliesTwitchGameStatusUpdateForFirstPlayerWhenLocalPlayerIdIsZero() {
+        ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+        GameStateService gameStateService = new GameStateService(new GameStateBroadcaster(objectMapper));
+        MtgoLogParserService applyingParser = new MtgoLogParserService(gameStateService, objectMapper);
+
+        Optional<CardZoneEvent> cardZoneEvent = applyingParser.parseAndApply("""
+                20:52:35 [INF] (Twitch Info|Game Play Status Update for Game ID: 950776188, Match ID: 287085497, Event ID: 287085497) {"Players":[{"Id":0,"Name":"DB_xerioc","LibraryCount":32,"HandCount":2,"Life":14},{"Id":1,"Name":"DB_BFG","LibraryCount":36,"HandCount":5,"Life":4}],"Cards":[{"Id":604,"CatalogID":82270,"Zone":"Battlefield","ActualZone":"Battlefield","Owner":0,"Controller":0},{"Id":530,"CatalogID":130651,"Zone":"Battlefield","ActualZone":"Battlefield","Owner":1,"Controller":1},{"Id":472,"CatalogID":123066,"Zone":"Hand","ActualZone":"Hand","Owner":0,"Controller":0},{"Id":562,"CatalogID":144288,"Zone":"Graveyard","ActualZone":"Graveyard","Owner":1,"Controller":1},{"Id":608,"CatalogID":90881,"Zone":"Graveyard","ActualZone":"Graveyard","Owner":0,"Controller":0}]}
+                """.trim());
+
+        GameState gameState = gameStateService.snapshot();
+        assertThat(cardZoneEvent).isEmpty();
+        assertThat(gameState.gameId()).isEqualTo(950776188);
+        assertThat(gameState.battlefieldCards()).extracting(GameCard::catalogId).containsExactly(82270);
+        assertThat(gameState.handCards()).extracting(GameCard::catalogId).containsExactly(123066);
+        assertThat(gameState.graveyardCards()).extracting(GameCard::catalogId).containsExactly(90881);
+        assertThat(gameState.battlefieldCards()).extracting(GameCard::catalogId).doesNotContain(130651);
+        assertThat(gameState.graveyardCards()).extracting(GameCard::catalogId).doesNotContain(144288);
+    }
 }

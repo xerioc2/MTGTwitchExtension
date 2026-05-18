@@ -1,10 +1,17 @@
 import { Activity, ChevronDown, ChevronRight, CircleAlert, RefreshCw } from 'lucide-react';
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { Component, useCallback, useEffect, useMemo, useState } from 'react';
 import DebugPage from './DebugPage.jsx';
 
-const websocketUrl = import.meta.env.VITE_BACKEND_WS_URL ?? 'ws://localhost:8080/ws/game-state';
+const websocketUrl = withNgrokSkipBrowserWarning(
+  import.meta.env.VITE_BACKEND_WS_URL ?? 'ws://localhost:8080/ws/game-state'
+);
 const backendApiUrl = import.meta.env.VITE_BACKEND_API_URL
   ?? websocketUrl.replace(/^ws/, 'http').replace('/ws/game-state', '');
+const backendFetchOptions = {
+  headers: {
+    'ngrok-skip-browser-warning': 'true'
+  }
+};
 const emptyGameState = {
   hand: [],
   battlefield: [],
@@ -35,15 +42,34 @@ const pipColors = {
   C: '#c7ced1'
 };
 
+function withNgrokSkipBrowserWarning(url) {
+  try {
+    const parsedUrl = new URL(url);
+    if (parsedUrl.hostname.endsWith('.ngrok-free.dev') || parsedUrl.hostname.endsWith('.ngrok.io')) {
+      parsedUrl.searchParams.set('ngrok-skip-browser-warning', 'true');
+    }
+    return parsedUrl.toString();
+  } catch {
+    return url;
+  }
+}
+
 export default function App() {
   if (window.location.pathname === '/debug') {
     return <DebugPage />;
   }
 
-  return <ExtensionPanel />;
+  const isOverlay = window.location.pathname.endsWith('/overlay.html')
+    || window.location.pathname === '/overlay';
+
+  return (
+    <ExtensionErrorBoundary>
+      <ExtensionPanel isOverlay={isOverlay} />
+    </ExtensionErrorBoundary>
+  );
 }
 
-function ExtensionPanel() {
+function ExtensionPanel({ isOverlay }) {
   const [connectionState, setConnectionState] = useState('connecting');
   const [gameState, setGameState] = useState(emptyGameState);
   const [lastError, setLastError] = useState('');
@@ -56,7 +82,7 @@ function ExtensionPanel() {
 
   const fetchCardDetails = useCallback(async (catalogId, { cacheFailures }) => {
     try {
-      const response = await fetch(`${backendApiUrl}/api/cards/${catalogId}`);
+      const response = await fetch(`${backendApiUrl}/api/cards/${catalogId}`, backendFetchOptions);
       if (!response.ok) {
         throw new Error(`Card ${catalogId} was not found.`);
       }
@@ -79,7 +105,17 @@ function ExtensionPanel() {
   }, []);
 
   useEffect(() => {
-    const socket = new WebSocket(websocketUrl);
+    let socket;
+
+    try {
+      socket = new WebSocket(websocketUrl);
+    } catch (error) {
+      window.setTimeout(() => {
+        setConnectionState('error');
+        setLastError(error instanceof Error ? error.message : 'WebSocket blocked.');
+      }, 0);
+      return undefined;
+    }
 
     socket.addEventListener('open', () => {
       setConnectionState('connected');
@@ -177,6 +213,7 @@ function ExtensionPanel() {
 
     try {
       const response = await fetch(`${backendApiUrl}/api/rescan-log`, {
+        ...backendFetchOptions,
         method: 'POST'
       });
       const result = await response.json();
@@ -197,10 +234,15 @@ function ExtensionPanel() {
 
   async function handleCardMouseEnter(card, event) {
     const rect = event.currentTarget.getBoundingClientRect();
+    const previewWidth = 226;
+    const previewLeft = isOverlay
+      ? Math.max(8, rect.left - previewWidth - 8)
+      : Math.min(rect.right + 8, window.innerWidth - previewWidth - 10);
+
     setHoveredCard({
       ...card,
       top: Math.min(rect.top, window.innerHeight - 260),
-      left: Math.min(rect.right + 8, window.innerWidth - 236),
+      left: previewLeft,
       loading: !cardDetailsByCatalogId[card.catalogId]
     });
 
@@ -221,7 +263,7 @@ function ExtensionPanel() {
   }
 
   return (
-    <main className="extension-shell">
+    <main className={isOverlay ? 'extension-shell extension-overlay-shell' : 'extension-shell'}>
       <section className="extension-panel" aria-labelledby="extension-title">
         <header className="extension-header">
           <div>
@@ -298,6 +340,43 @@ function ExtensionPanel() {
       )}
     </main>
   );
+}
+
+class ExtensionErrorBoundary extends Component {
+  constructor(props) {
+    super(props);
+    this.state = { errorMessage: '' };
+  }
+
+  static getDerivedStateFromError(error) {
+    return {
+      errorMessage: error instanceof Error ? error.message : 'Extension failed to render.'
+    };
+  }
+
+  render() {
+    if (this.state.errorMessage) {
+      return (
+        <main className="extension-shell extension-overlay-shell">
+          <section className="extension-panel">
+            <header className="extension-header">
+              <div>
+                <h1>MTGO Zones</h1>
+                <p>Render error</p>
+              </div>
+              <span className="extension-status error">
+                <CircleAlert aria-hidden="true" size={13} />
+                error
+              </span>
+            </header>
+            <div className="extension-message">{this.state.errorMessage}</div>
+          </section>
+        </main>
+      );
+    }
+
+    return this.props.children;
+  }
 }
 
 function ManaCost({ manaCost }) {

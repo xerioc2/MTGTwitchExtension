@@ -14,12 +14,41 @@ export default defineConfig({
     rollupOptions: {
       input: {
         index: resolve(projectRoot, 'index.html'),
-        twitch: resolve(projectRoot, 'twitch.html')
+        twitch: resolve(projectRoot, 'twitch.html'),
+        overlay: resolve(projectRoot, 'overlay.html')
       }
     }
   },
   server: {
     port: 5173,
-    strictPort: true
+    strictPort: true,
+    allowedHosts: [
+      'localhost',
+      '127.0.0.1',
+      'mulled-cancel-bony.ngrok-free.dev'
+    ],
+    proxy: {
+      '/api': 'http://localhost:8080',
+      '/ws': {
+        target: 'ws://localhost:8080',
+        ws: true
+      }
+    }
+  },
+  preview: {
+    port: 4173,
+    strictPort: true,
+    allowedHosts: [
+      'localhost',
+      '127.0.0.1',
+      'mulled-cancel-bony.ngrok-free.dev'
+    ],
+    proxy: {
+      '/api': 'http://localhost:8080',
+      '/ws': {
+        target: 'ws://localhost:8080',
+        ws: true
+      }
+    }
   }
 });

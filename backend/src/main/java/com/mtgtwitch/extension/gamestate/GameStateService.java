@@ -49,8 +49,9 @@ public class GameStateService {
         players = List.copyOf(event.players());
         clearTrackedZones();
 
+        int localPlayerId = players.isEmpty() ? 0 : players.getFirst().id();
         event.cards().stream()
-                .filter(card -> card.owner() == 1)
+                .filter(card -> card.owner() == localPlayerId)
                 .forEach(this::addStatusCard);
 
         GameState gameState = snapshot();
