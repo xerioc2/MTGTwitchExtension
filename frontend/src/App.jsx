@@ -2,16 +2,9 @@ import { Activity, ChevronDown, ChevronRight, CircleAlert, RefreshCw } from 'luc
 import { Component, useCallback, useEffect, useMemo, useState } from 'react';
 import DebugPage from './DebugPage.jsx';
 
-const websocketUrl = withNgrokSkipBrowserWarning(
-  import.meta.env.VITE_BACKEND_WS_URL ?? 'ws://localhost:8080/ws/game-state'
-);
-const backendApiUrl = import.meta.env.VITE_BACKEND_API_URL
-  ?? websocketUrl.replace(/^ws/, 'http').replace('/ws/game-state', '');
-const backendFetchOptions = {
-  headers: {
-    'ngrok-skip-browser-warning': 'true'
-  }
-};
+const runtimeBackendUrls = resolveRuntimeBackendUrls();
+const websocketUrl = import.meta.env.VITE_BACKEND_WS_URL ?? runtimeBackendUrls.websocketUrl;
+const backendApiUrl = import.meta.env.VITE_BACKEND_API_URL ?? runtimeBackendUrls.backendApiUrl;
 const emptyGameState = {
   hand: [],
   battlefield: [],
@@ -42,16 +35,13 @@ const pipColors = {
   C: '#c7ced1'
 };
 
-function withNgrokSkipBrowserWarning(url) {
-  try {
-    const parsedUrl = new URL(url);
-    if (parsedUrl.hostname.endsWith('.ngrok-free.dev') || parsedUrl.hostname.endsWith('.ngrok.io')) {
-      parsedUrl.searchParams.set('ngrok-skip-browser-warning', 'true');
-    }
-    return parsedUrl.toString();
-  } catch {
-    return url;
-  }
+function resolveRuntimeBackendUrls() {
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+
+  return {
+    websocketUrl: `${wsProtocol}//${window.location.host}/ws/game-state`,
+    backendApiUrl: `${window.location.protocol}//${window.location.host}`
+  };
 }
 
 export default function App() {
@@ -82,7 +72,7 @@ function ExtensionPanel({ isOverlay }) {
 
   const fetchCardDetails = useCallback(async (catalogId, { cacheFailures }) => {
     try {
-      const response = await fetch(`${backendApiUrl}/api/cards/${catalogId}`, backendFetchOptions);
+      const response = await fetch(`${backendApiUrl}/api/cards/${catalogId}`);
       if (!response.ok) {
         throw new Error(`Card ${catalogId} was not found.`);
       }
@@ -213,7 +203,6 @@ function ExtensionPanel({ isOverlay }) {
 
     try {
       const response = await fetch(`${backendApiUrl}/api/rescan-log`, {
-        ...backendFetchOptions,
         method: 'POST'
       });
       const result = await response.json();

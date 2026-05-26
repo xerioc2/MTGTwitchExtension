@@ -18,6 +18,13 @@ body {
   min-height: 100vh;
 }
 
+html:has(.extension-overlay-shell),
+body:has(.extension-overlay-shell),
+body:has(.extension-overlay-shell) #root {
+  min-width: 0;
+  background: transparent;
+}
+
 .overlay-fallback-shell {
   min-height: 100vh;
   display: flex;
@@ -57,7 +64,10 @@ textarea {
 }
 
 .extension-overlay-shell {
+  min-height: 0;
+  height: 100vh;
   justify-content: flex-end;
+  align-items: flex-start;
   background: transparent;
   pointer-events: none;
 }
@@ -99,10 +109,15 @@ textarea {
 
 .extension-overlay-shell .extension-panel {
   width: 320px;
+  min-height: 0;
+  max-height: min(76vh, 640px);
+  margin-top: 10px;
   margin-left: auto;
   transform: translateX(286px);
   border-right: 0;
   border-left: 1px solid rgba(88, 80, 65, 0.9);
+  border-bottom: 1px solid rgba(88, 80, 65, 0.9);
+  border-radius: 6px 0 0 6px;
   background: rgba(24, 23, 19, 0.94);
   box-shadow: -14px 0 38px rgba(0, 0, 0, 0.42);
   pointer-events: auto;

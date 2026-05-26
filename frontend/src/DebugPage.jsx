@@ -1,8 +1,9 @@
 import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 
-const websocketUrl = 'ws://localhost:8080/ws/game-state';
-const backendApiUrl = 'http://localhost:8080';
+const runtimeBackendUrls = resolveRuntimeBackendUrls();
+const websocketUrl = import.meta.env.VITE_BACKEND_WS_URL ?? runtimeBackendUrls.websocketUrl;
+const backendApiUrl = import.meta.env.VITE_BACKEND_API_URL ?? runtimeBackendUrls.backendApiUrl;
 const emptyGameState = {
   hand: [],
   battlefield: [],
@@ -31,6 +32,15 @@ const pipColors = {
   G: '#74c383',
   C: '#c7ced1'
 };
+
+function resolveRuntimeBackendUrls() {
+  const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+
+  return {
+    websocketUrl: `${wsProtocol}//${window.location.host}/ws/game-state`,
+    backendApiUrl: `${window.location.protocol}//${window.location.host}`
+  };
+}
 
 export default function DebugPage() {
   const [connectionState, setConnectionState] = useState('connecting');
