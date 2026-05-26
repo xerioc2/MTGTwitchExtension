@@ -1,10 +1,17 @@
 import { Activity, ChevronDown, ChevronRight, CircleAlert, RefreshCw } from 'lucide-react';
+import { createClient } from '@supabase/supabase-js';
 import { Component, useCallback, useEffect, useMemo, useState } from 'react';
 import DebugPage from './DebugPage.jsx';
 
 const runtimeBackendUrls = resolveRuntimeBackendUrls();
 const websocketUrl = import.meta.env.VITE_BACKEND_WS_URL ?? runtimeBackendUrls.websocketUrl;
 const backendApiUrl = import.meta.env.VITE_BACKEND_API_URL ?? runtimeBackendUrls.backendApiUrl;
+const supabaseConfig = {
+  url: import.meta.env.VITE_SUPABASE_URL,
+  anonKey: import.meta.env.VITE_SUPABASE_ANON_KEY,
+  channelId: import.meta.env.VITE_SUPABASE_CHANNEL_ID ?? 'xerioc2'
+};
+const shouldUseSupabaseRelay = Boolean(supabaseConfig.url && supabaseConfig.anonKey);
 const emptyGameState = {
   hand: [],
   battlefield: [],
@@ -72,12 +79,7 @@ function ExtensionPanel({ isOverlay }) {
 
   const fetchCardDetails = useCallback(async (catalogId, { cacheFailures }) => {
     try {
-      const response = await fetch(`${backendApiUrl}/api/cards/${catalogId}`);
-      if (!response.ok) {
-        throw new Error(`Card ${catalogId} was not found.`);
-      }
-
-      const details = await response.json();
+      const details = await fetchCardDetailsFromBackendOrScryfall(catalogId);
       setCardDetailsByCatalogId((current) => ({
         ...current,
         [catalogId]: details
@@ -95,6 +97,33 @@ function ExtensionPanel({ isOverlay }) {
   }, []);
 
   useEffect(() => {
+    if (shouldUseSupabaseRelay) {
+      const supabase = createClient(supabaseConfig.url, supabaseConfig.anonKey);
+      const channel = supabase.channel(`game-state:${supabaseConfig.channelId}`);
+
+      channel
+        .on('broadcast', { event: 'game-state' }, (message) => {
+          const nextGameState = message.payload?.payload ?? message.payload;
+          setGameState({ ...emptyGameState, ...nextGameState });
+          setLastError('');
+        })
+        .subscribe((status) => {
+          if (status === 'SUBSCRIBED') {
+            setConnectionState('connected');
+            setLastError('');
+          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+            setConnectionState('error');
+            setLastError(`Supabase relay ${status.toLowerCase().replace('_', ' ')}.`);
+          } else if (status === 'CLOSED') {
+            setConnectionState('disconnected');
+          }
+        });
+
+      return () => {
+        supabase.removeChannel(channel);
+      };
+    }
+
     let socket;
 
     try {
@@ -485,6 +514,42 @@ function buildPlaceholderCard(card) {
     manaCost: card.manaCost || '',
     typeLine: card.typeLine || `Catalog ID ${card.catalogId}`
   };
+}
+
+async function fetchCardDetailsFromBackendOrScryfall(catalogId) {
+  try {
+    const response = await fetch(`${backendApiUrl}/api/cards/${catalogId}`);
+    if (response.ok) {
+      return response.json();
+    }
+  } catch {
+    // Hosted Test may not have access to the local bridge API; fall back to Scryfall.
+  }
+
+  return fetchCardDetailsFromScryfall(catalogId);
+}
+
+async function fetchCardDetailsFromScryfall(catalogId) {
+  const card = await fetchScryfallCard(`https://api.scryfall.com/cards/mtgo/${catalogId}`)
+    ?? await fetchScryfallCard(`https://api.scryfall.com/cards/multiverse/${catalogId}`);
+
+  if (!card) {
+    throw new Error(`Card ${catalogId} was not found.`);
+  }
+
+  return {
+    catalogId,
+    name: card.name,
+    typeLine: card.type_line,
+    manaCost: card.mana_cost,
+    oracleText: card.oracle_text,
+    imageUrl: card.image_uris?.normal
+  };
+}
+
+async function fetchScryfallCard(url) {
+  const response = await fetch(url);
+  return response.ok ? response.json() : null;
 }
 
 function sleep(milliseconds) {

@@ -3,8 +3,10 @@ package com.mtgtwitch.extension.websocket;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mtgtwitch.extension.gamestate.GameState;
+import com.mtgtwitch.extension.relay.SupabaseRelayPublisher;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.TextMessage;
 import org.springframework.web.socket.WebSocketSession;
@@ -20,10 +22,17 @@ public class GameStateBroadcaster {
 
     private final Set<WebSocketSession> sessions = new CopyOnWriteArraySet<>();
     private final ObjectMapper objectMapper;
+    private final SupabaseRelayPublisher supabaseRelayPublisher;
     private volatile String latestGameStateJson;
 
     public GameStateBroadcaster(ObjectMapper objectMapper) {
+        this(objectMapper, null);
+    }
+
+    @Autowired
+    public GameStateBroadcaster(ObjectMapper objectMapper, SupabaseRelayPublisher supabaseRelayPublisher) {
         this.objectMapper = objectMapper;
+        this.supabaseRelayPublisher = supabaseRelayPublisher;
     }
 
     public void addSession(WebSocketSession session) {
@@ -50,6 +59,10 @@ public class GameStateBroadcaster {
 
         for (WebSocketSession session : sessions) {
             send(session, latestGameStateJson);
+        }
+
+        if (supabaseRelayPublisher != null) {
+            supabaseRelayPublisher.publish(gameState);
         }
     }
 
