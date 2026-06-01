@@ -49,7 +49,7 @@ public class MtgoLogParserService {
     );
 
     private static final Pattern TWITCH_DECK_PATTERN = Pattern.compile(
-            "^\\d{2}:\\d{2}:\\d{2}\\s+\\[INF]\\s+\\(Twitch Info\\|Username:\\s+.*?\\s+Deck Used in Game ID:\\s+(\\d+)\\)\\s+(\\[.*])$"
+            "^\\d{2}:\\d{2}:\\d{2}\\s+\\[INF]\\s+\\(Twitch Info\\|Username:\\s+(.+?)\\s+Deck Used in Game ID:\\s+(\\d+)\\)\\s+(\\[.*])$"
     );
 
     private static final Pattern GAME_STATUS_PATTERN = Pattern.compile(
@@ -114,13 +114,15 @@ public class MtgoLogParserService {
             return Optional.empty();
         }
 
-        long gameId = Long.parseLong(matcher.group(1));
-        String deckJson = matcher.group(2);
+        String username = matcher.group(1).trim();
+        long gameId = Long.parseLong(matcher.group(2));
+        String deckJson = matcher.group(3);
 
         try {
             DeckCatalogEntry[] entries = objectMapper.readValue(deckJson, DeckCatalogEntry[].class);
             return Optional.of(new DeckCatalogEvent(
                     gameId,
+                    username,
                     Arrays.stream(entries)
                             .map(DeckCatalogEntry::catalogId)
                             .toList(),

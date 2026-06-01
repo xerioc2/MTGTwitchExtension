@@ -548,7 +548,11 @@ async function fetchCardDetailsFromScryfall(catalogId) {
 }
 
 async function fetchScryfallCard(url) {
-  const response = await fetch(url);
+  const response = await fetch(url, {
+    headers: {
+      Accept: 'application/json'
+    }
+  });
   return response.ok ? response.json() : null;
 }
 

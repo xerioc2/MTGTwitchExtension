@@ -24,25 +24,36 @@ public class SupabaseRelayPublisher {
 
     private final RestTemplate restTemplate;
     private final String broadcastUrl;
+    private final String relayFunctionUrl;
     private final String serviceRoleKey;
+    private final String bridgePublishToken;
     private final String channelId;
 
     public SupabaseRelayPublisher(
             RestTemplateBuilder restTemplateBuilder,
             @Value("${supabase.url}") String supabaseUrl,
             @Value("${supabase.service-role-key}") String serviceRoleKey,
-            @Value("${supabase.channel-id}") String channelId
+            @Value("${supabase.channel-id}") String channelId,
+            @Value("${supabase.relay-function-url}") String relayFunctionUrl,
+            @Value("${supabase.bridge-publish-token}") String bridgePublishToken
     ) {
         this.restTemplate = restTemplateBuilder
                 .setConnectTimeout(Duration.ofSeconds(3))
                 .setReadTimeout(Duration.ofSeconds(3))
                 .build();
         this.broadcastUrl = supabaseUrl.replaceAll("/+$", "") + "/realtime/v1/api/broadcast";
+        this.relayFunctionUrl = relayFunctionUrl;
         this.serviceRoleKey = serviceRoleKey;
+        this.bridgePublishToken = bridgePublishToken;
         this.channelId = channelId;
     }
 
     public void publish(GameState gameState) {
+        if (StringUtils.hasText(relayFunctionUrl)) {
+            publishThroughRelayFunction(gameState);
+            return;
+        }
+
         if (!StringUtils.hasText(serviceRoleKey)) {
             return;
         }
@@ -67,9 +78,32 @@ public class SupabaseRelayPublisher {
         }
     }
 
+    private void publishThroughRelayFunction(GameState gameState) {
+        if (!StringUtils.hasText(bridgePublishToken)) {
+            log.warn("Supabase relay function URL is configured, but BRIDGE_PUBLISH_TOKEN is missing.");
+            return;
+        }
+
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentType(MediaType.APPLICATION_JSON);
+        headers.setBearerAuth(bridgePublishToken);
+
+        RelayFunctionRequest request = new RelayFunctionRequest(channelId, gameState);
+
+        try {
+            restTemplate.postForEntity(relayFunctionUrl, new HttpEntity<>(request, headers), Void.class);
+            log.info("Published MTGO game state through relay function channel game-state:{}.", channelId);
+        } catch (RestClientException exception) {
+            log.warn("Failed to publish MTGO game state through relay function channel game-state:{}.", channelId, exception);
+        }
+    }
+
     private record BroadcastRequest(List<BroadcastMessage> messages) {
     }
 
     private record BroadcastMessage(String topic, String event, GameState payload) {
+    }
+
+    private record RelayFunctionRequest(String channelId, GameState gameState) {
     }
 }

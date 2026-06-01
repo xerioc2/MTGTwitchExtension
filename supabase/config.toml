@@ -1,0 +1,4 @@
+project_id = "lgzmxstmqzwjbmurstye"
+
+[functions.publish-game-state]
+verify_jwt = false

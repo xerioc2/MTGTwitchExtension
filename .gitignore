@@ -24,6 +24,8 @@ node_modules/
 coverage/
 *.egg-info/
 frontend/magiccontent-*.zip
+frontend/vite-*.log
+supabase/.temp/
 
 # OS junk
 .DS_Store

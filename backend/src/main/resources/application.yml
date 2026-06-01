@@ -24,3 +24,5 @@ supabase:
   url: ${SUPABASE_URL:https://lgzmxstmqzwjbmurstye.supabase.co}
   service-role-key: ${SUPABASE_SERVICE_ROLE_KEY:}
   channel-id: ${SUPABASE_CHANNEL_ID:xerioc2}
+  relay-function-url: ${SUPABASE_RELAY_FUNCTION_URL:}
+  bridge-publish-token: ${BRIDGE_PUBLISH_TOKEN:}
