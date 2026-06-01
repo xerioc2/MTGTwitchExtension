@@ -18,11 +18,12 @@ mtgo:
     raw-log: ${MTGO_DEBUG_RAW_LOG:false}
 
 twitch:
-  client-id: ${TWITCH_CLIENT_ID:}
+  client-id: ${TWITCH_CLIENT_ID:i68wrrm8hl8qzvtbyupokyg0a8d9sd}
 
 supabase:
   url: ${SUPABASE_URL:https://lgzmxstmqzwjbmurstye.supabase.co}
   service-role-key: ${SUPABASE_SERVICE_ROLE_KEY:}
-  channel-id: ${SUPABASE_CHANNEL_ID:xerioc2}
+  channel-id: ${SUPABASE_CHANNEL_ID:}
   relay-function-url: ${SUPABASE_RELAY_FUNCTION_URL:}
   bridge-publish-token: ${BRIDGE_PUBLISH_TOKEN:}
+  issue-token-url: ${SUPABASE_ISSUE_TOKEN_URL:https://lgzmxstmqzwjbmurstye.supabase.co/functions/v1/issue-bridge-token}

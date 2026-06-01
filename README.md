@@ -1,32 +1,50 @@
-# MTGO Twitch Extension
+# magiccontent — MTGO Twitch Overlay
 
-MTGO Twitch Extension shows Magic: The Gathering Online game zones in a Twitch panel. The local bridge watches MTGO's `mtgo.log`, parses game state, resolves card data through Scryfall, and serves the panel over WebSocket/REST.
+magiccontent is a Twitch video overlay for Magic: The Gathering Online. It watches the streamer's MTGO game log through a small Windows bridge app, sends the current game state to the hosted Twitch Extension, and lets viewers see cards grouped by zone with hover previews for card image, type line, mana cost, and oracle text.
 
 ## For Streamers
 
-1. Install or unzip `MTGO Twitch Bridge`.
-2. Open MTGO first.
-3. Run `MTGO Twitch Bridge.exe`.
-4. The bridge window should show:
-   - Backend: `Running`
-   - MTGO log: `Found`
-   - WebSocket URL: `ws://localhost:8080/ws/game-state` or the next available port up to `8090`
-5. If MTGO updates or the log is not found, click `Refresh Log`.
-6. Use `Stop/Close` or the system tray `Exit` menu to shut the bridge down cleanly.
+### Requirements
 
-The bridge auto-discovers the newest `%LOCALAPPDATA%\Apps\2.0\...\Logs\mtgo.log`. No Java, Maven, or terminal is needed for the packaged app-image/exe build.
+- Windows PC
+- Magic: The Gathering Online installed
+- A Twitch account
 
-## Twitch Upload
+### Setup
 
-The Twitch Extension asset zip is:
+1. Install the bridge
+   Download `MTGO Twitch Bridge-x.x.x.exe` and run it.
+
+2. Login with Twitch
+   Click `Login with Twitch` in the bridge window and complete the Twitch login in your browser.
+
+3. Activate the extension
+   Go to your Twitch Creator Dashboard, find `magiccontent` under Extensions, and add it as a Video Overlay.
+
+### Using It
+
+- Open MTGO before starting the bridge.
+- The bridge runs in the system tray while you stream.
+- If the overlay stops updating, click `Refresh Log` in the bridge window.
+- To switch Twitch accounts, use `Log out` from the system tray.
+
+## For Viewers
+
+The overlay shows the streamer's visible MTGO zones: hand, battlefield, graveyard, and exile. Hover over a card row to open a preview with the card image and rules text. The overlay is designed to sit on the side of the video and only expand when viewers interact with it.
+
+## For Developers
+
+### Architecture
+
+The production path is:
 
 ```text
-frontend/magiccontent-0.0.2.zip
+MTGO log -> Spring Boot bridge -> Supabase Edge Function -> Supabase Realtime -> Twitch Hosted Extension
 ```
 
-Upload the contents zip to Twitch Extension Asset Hosting. `twitch.html` is at the zip root.
+The Spring Boot bridge discovers and watches MTGO's `mtgo.log`, parses game-state updates, resolves card data through Scryfall, and publishes state through a Supabase relay. The Twitch Extension is hosted by Twitch and subscribes to Supabase Realtime. A local WebSocket path remains available for development and debugging.
 
-## Local Development
+### Local Development
 
 Backend:
 
@@ -35,7 +53,7 @@ cd backend
 mvn spring-boot:run
 ```
 
-Optional environment/config:
+Optional backend configuration:
 
 ```powershell
 $env:MTGO_LOG_PATH="C:\path\to\mtgo.log"
@@ -57,32 +75,84 @@ cd frontend
 npm run build
 ```
 
-Build the portable Windows bridge app:
+The local debug page is available at:
+
+```text
+http://localhost:5173/debug
+```
+
+The main overlay entry point is:
+
+```text
+overlay.html
+```
+
+### Supabase Edge Functions
+
+The relay functions live in `supabase/functions/`:
+
+- `publish-game-state` validates bridge publish tokens and broadcasts game state.
+- `issue-bridge-token` verifies Twitch login and issues a per-streamer bridge token.
+
+Deploy functions:
+
+```powershell
+supabase functions deploy publish-game-state
+supabase functions deploy issue-bridge-token
+```
+
+Set required Supabase secrets:
+
+```powershell
+supabase secrets set SUPABASE_URL=<your-supabase-url>
+supabase secrets set SUPABASE_SERVICE_ROLE_KEY=<your-service-role-key>
+supabase secrets set TWITCH_CLIENT_ID=<your-twitch-client-id>
+```
+
+Apply database migrations from `supabase/migrations/` before validating the relay flow.
+
+### Building the Installer
+
+Build the desktop bridge jar:
+
+```powershell
+cd backend
+mvn -Pdesktop package -DskipTests
+```
+
+Build a portable Windows app folder:
 
 ```powershell
 cd backend
 .\package-windows.ps1 -Type app-image -Version 0.0.2
 ```
 
-Build a Windows installer exe after installing WiX 3.x:
+Build a Windows installer `.exe`:
 
 ```powershell
 cd backend
 .\package-windows.ps1 -Type exe -Version 0.0.2
 ```
 
-WiX installer tooling: https://github.com/wixtoolset/wix3/releases
+The `.exe` build requires WiX Toolset 3.x so `candle.exe` and `light.exe` are available on `PATH`.
 
-## Project Structure
+WiX installer tooling:
 
-- `backend/` - Spring Boot bridge, MTGO log watcher/parser, REST API, WebSocket server, Scryfall resolution, Swing launcher, packaging script.
-- `frontend/` - React + Vite Twitch Extension panel and local debug page.
-- `docs/` - Design notes and project documentation.
+```text
+https://github.com/wixtoolset/wix3/releases
+```
+
+### Project Structure
+
+- `backend/` - Spring Boot bridge, MTGO log discovery/watcher, parser, REST API, WebSocket fallback, Scryfall resolution, Swing launcher, and Windows packaging script.
+- `frontend/` - React + Vite Twitch Extension overlay and local debug page.
+- `supabase/` - Edge Functions, Supabase config, and database migrations for the hosted relay.
+- `docs/` - Architecture notes and project documentation.
 - `ops/` - Local development environment examples.
 
-## Useful Endpoints
+### API Reference
 
-- `GET /api/status` - returns the active backend port.
+- `GET /api/status` - returns backend status information, including the active port.
 - `POST /api/rescan-log` - re-runs MTGO log discovery and restarts the watcher.
 - `GET /api/cards/{catalogId}` - resolves card data through Scryfall.
-- `ws://localhost:{port}/ws/game-state` - broadcasts current game state.
+- `ws://localhost:{port}/ws/game-state` - local development WebSocket fallback for current game state.

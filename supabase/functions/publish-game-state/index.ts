@@ -1,11 +1,14 @@
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
-const BRIDGE_PUBLISH_TOKEN = Deno.env.get("BRIDGE_PUBLISH_TOKEN") ?? "";
 const GAME_STATE_EVENT = "game-state";
 
 type PublishRequest = {
   channelId?: string;
   gameState?: unknown;
+};
+
+type StreamerRelayRow = {
+  twitch_login: string;
 };
 
 Deno.serve(async (request) => {
@@ -16,7 +19,7 @@ Deno.serve(async (request) => {
   const authorization = request.headers.get("authorization") ?? "";
   const token = authorization.replace(/^Bearer\s+/i, "").trim();
 
-  if (!BRIDGE_PUBLISH_TOKEN || token !== BRIDGE_PUBLISH_TOKEN) {
+  if (!token) {
     return json({ error: "Unauthorized" }, 401);
   }
 
@@ -31,9 +34,18 @@ Deno.serve(async (request) => {
     return json({ error: "Invalid JSON" }, 400);
   }
 
-  const channelId = sanitizeChannelId(payload.channelId);
-  if (!channelId || payload.gameState == null) {
-    return json({ error: "channelId and gameState are required" }, 400);
+  if (payload.gameState == null) {
+    return json({ error: "gameState is required" }, 400);
+  }
+
+  const relay = await findStreamerRelay(await sha256Hex(token));
+  if (!relay) {
+    return json({ error: "Unauthorized" }, 401);
+  }
+
+  const channelId = sanitizeChannelId(relay.twitch_login);
+  if (!channelId) {
+    return json({ error: "Invalid streamer relay channel" }, 500);
   }
 
   const response = await fetch(`${SUPABASE_URL.replace(/\/+$/, "")}/realtime/v1/api/broadcast`, {
@@ -60,6 +72,40 @@ Deno.serve(async (request) => {
 
   return json({ ok: true, channelId });
 });
+
+async function findStreamerRelay(bridgeTokenHash: string) {
+  const params = new URLSearchParams({
+    bridge_token_hash: `eq.${bridgeTokenHash}`,
+    revoked_at: "is.null",
+    select: "twitch_login",
+    limit: "1"
+  });
+
+  const response = await fetch(`${SUPABASE_URL.replace(/\/+$/, "")}/rest/v1/streamer_relays?${params}`, {
+    headers: {
+      "apikey": SUPABASE_SERVICE_ROLE_KEY,
+      "authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
+    }
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const rows = await response.json() as StreamerRelayRow[];
+  return rows[0] ?? null;
+}
+
+async function sha256Hex(value: string) {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return bytesToHex(new Uint8Array(digest));
+}
+
+function bytesToHex(bytes: Uint8Array) {
+  return Array.from(bytes)
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
 
 function sanitizeChannelId(channelId: unknown) {
   if (typeof channelId !== "string") {

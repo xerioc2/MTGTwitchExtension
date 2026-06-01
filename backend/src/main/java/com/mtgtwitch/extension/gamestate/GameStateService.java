@@ -1,6 +1,8 @@
 package com.mtgtwitch.extension.gamestate;
 
 import com.mtgtwitch.extension.websocket.GameStateBroadcaster;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -13,6 +15,8 @@ import java.util.OptionalInt;
 
 @Service
 public class GameStateService {
+
+    private static final Logger log = LoggerFactory.getLogger(GameStateService.class);
 
     private final Map<Zone, List<String>> zones = new EnumMap<>(Zone.class);
     private final Map<Zone, List<GameCard>> zoneCards = new EnumMap<>(Zone.class);
@@ -111,6 +115,7 @@ public class GameStateService {
             clearTrackedZones();
             deckCatalogIds = List.of();
             players = List.of();
+            localPlayerName = null;
         }
     }
 
@@ -122,6 +127,10 @@ public class GameStateService {
 
         if (playerIdByName.isPresent()) {
             return playerIdByName.getAsInt();
+        }
+
+        if (localPlayerName != null && !localPlayerName.isBlank()) {
+            log.warn("Local player name '{}' did not match any player — falling back to first player.", localPlayerName);
         }
 
         return players.isEmpty() ? 0 : players.getFirst().id();

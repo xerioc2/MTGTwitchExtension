@@ -1,6 +1,5 @@
 param(
-    [string]$EnvFile = ".env.local",
-    [string]$BackendEnvFile = "backend/.env.local"
+    [string]$EnvFile = ".env.local"
 )
 
 $ErrorActionPreference = "Stop"
@@ -36,10 +35,9 @@ function Read-EnvFile($Path) {
 }
 
 $rootEnv = Read-EnvFile $EnvFile
-$backendEnv = Read-EnvFile $BackendEnvFile
 
 $serviceRoleKey = $rootEnv["SUPABASE_SERVICE_ROLE_KEY"]
-$bridgePublishToken = $backendEnv["BRIDGE_PUBLISH_TOKEN"]
+$twitchClientId = $rootEnv["TWITCH_CLIENT_ID"]
 
 if (-not $env:SUPABASE_ACCESS_TOKEN) {
     throw "SUPABASE_ACCESS_TOKEN is not set. Create a Supabase access token, set it in this PowerShell session, then rerun this script."
@@ -49,8 +47,8 @@ if (-not $serviceRoleKey) {
     throw "SUPABASE_SERVICE_ROLE_KEY was not found in $EnvFile."
 }
 
-if (-not $bridgePublishToken) {
-    throw "BRIDGE_PUBLISH_TOKEN was not found in $BackendEnvFile."
+if (-not $twitchClientId) {
+    throw "TWITCH_CLIENT_ID was not found in $EnvFile."
 }
 
 $supabase = Join-Path $env:USERPROFILE "scoop/shims/supabase.exe"
@@ -61,7 +59,7 @@ if (-not (Test-Path -LiteralPath $supabase)) {
 & $supabase secrets set --project-ref lgzmxstmqzwjbmurstye `
     "SUPABASE_URL=https://lgzmxstmqzwjbmurstye.supabase.co" `
     "SUPABASE_SERVICE_ROLE_KEY=$serviceRoleKey" `
-    "BRIDGE_PUBLISH_TOKEN=$bridgePublishToken"
+    "TWITCH_CLIENT_ID=$twitchClientId"
 
 if ($LASTEXITCODE -ne 0) {
     throw "supabase secrets set failed with exit code $LASTEXITCODE"

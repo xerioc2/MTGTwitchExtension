@@ -24,10 +24,10 @@ public class SupabaseRelayPublisher {
 
     private final RestTemplate restTemplate;
     private final String broadcastUrl;
-    private final String relayFunctionUrl;
     private final String serviceRoleKey;
-    private final String bridgePublishToken;
-    private final String channelId;
+    private String relayFunctionUrl;
+    private String bridgePublishToken;
+    private String channelId;
 
     public SupabaseRelayPublisher(
             RestTemplateBuilder restTemplateBuilder,
@@ -48,7 +48,14 @@ public class SupabaseRelayPublisher {
         this.channelId = channelId;
     }
 
-    public void publish(GameState gameState) {
+    public synchronized void configure(String channelId, String relayFunctionUrl, String bridgePublishToken) {
+        this.channelId = channelId;
+        this.relayFunctionUrl = relayFunctionUrl;
+        this.bridgePublishToken = bridgePublishToken;
+        log.info("Configured Supabase relay publisher for channel '{}'.", StringUtils.hasText(channelId) ? channelId : "none");
+    }
+
+    public synchronized void publish(GameState gameState) {
         if (StringUtils.hasText(relayFunctionUrl)) {
             publishThroughRelayFunction(gameState);
             return;

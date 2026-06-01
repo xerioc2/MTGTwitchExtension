@@ -1,8 +1,12 @@
 package com.mtgtwitch.extension.desktop;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import com.mtgtwitch.extension.MtgoTwitchExtensionApplication;
 import com.mtgtwitch.extension.log.LogWatchStatus;
+import com.mtgtwitch.extension.relay.SupabaseRelayPublisher;
+import com.sun.net.httpserver.HttpExchange;
+import com.sun.net.httpserver.HttpServer;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.ConfigurableApplicationContext;
 
@@ -10,7 +14,6 @@ import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
-import javax.swing.JMenuItem;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.SwingUtilities;
@@ -18,6 +21,7 @@ import javax.swing.Timer;
 import java.awt.AWTException;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Desktop;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
@@ -34,18 +38,28 @@ import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.event.WindowStateListener;
 import java.io.IOException;
+import java.net.BindException;
 import java.net.InetSocketAddress;
+import java.net.URLDecoder;
+import java.net.URLEncoder;
 import java.net.Socket;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.security.SecureRandom;
+import java.util.Base64;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.Map;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -56,6 +70,18 @@ public class MtgoBridgeLauncher {
     private static final String MESSAGE = "Open MTGO first, then start the bridge. If MTGO updates or the log is not found, click Refresh Log.";
     private static final int DEFAULT_PORT = 8080;
     private static final int MAX_PORT = 8090;
+    private static final int TWITCH_CALLBACK_PORT = 8787;
+    private static final String TWITCH_CALLBACK_PATH = "/callback";
+    private static final SecureRandom SECURE_RANDOM = new SecureRandom();
+    private static final Path CONFIG_PATH = Path.of(
+            System.getenv("APPDATA") == null ? System.getProperty("user.home") : System.getenv("APPDATA"),
+            "MTGO Twitch Bridge",
+            "config.properties"
+    );
+    private static final String TWITCH_LOGIN_KEY = "twitch.login";
+    private static final String CHANNEL_ID_KEY = "supabase.channel.id";
+    private static final String RELAY_FUNCTION_URL_KEY = "supabase.relay.function.url";
+    private static final String BRIDGE_PUBLISH_TOKEN_KEY = "bridge.publish.token";
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter
             .ofPattern("MMM d, h:mm:ss a")
             .withZone(ZoneId.systemDefault());
@@ -69,8 +95,11 @@ public class MtgoBridgeLauncher {
     private JLabel logPathValue;
     private JLabel websocketValue;
     private JLabel lastActivityValue;
+    private JLabel authStatusValue;
+    private JButton loginButton;
     private JButton refreshButton;
     private JButton stopButton;
+    private MenuItem logoutMenuItem;
     private TrayIcon trayIcon;
     private Timer statusTimer;
     private ConfigurableApplicationContext applicationContext;
@@ -78,12 +107,15 @@ public class MtgoBridgeLauncher {
     private String websocketUrl = websocketUrl(DEFAULT_PORT);
     private final AtomicBoolean shutdownStarted = new AtomicBoolean(false);
     private volatile LogWatchStatus latestStatus = new LogWatchStatus(null, false, "Starting...");
+    private volatile BridgeConfig bridgeConfig;
 
     public static void main(String[] args) {
         SwingUtilities.invokeLater(() -> new MtgoBridgeLauncher().start(args));
     }
 
     private void start(String[] args) {
+        bridgeConfig = loadBridgeConfig().orElse(null);
+
         Optional<Integer> availablePort = findAvailablePort();
         if (availablePort.isEmpty()) {
             JOptionPane.showMessageDialog(
@@ -100,7 +132,9 @@ public class MtgoBridgeLauncher {
         websocketUrl = websocketUrl(serverPort);
 
         createWindow();
+        updateAuthUi();
         setupTray();
+        updateAuthUi();
         frame.setVisible(true);
         startSpringBoot(withServerPort(args, serverPort));
     }
@@ -132,14 +166,18 @@ public class MtgoBridgeLauncher {
         logPathValue = addStatusRow(statusPanel, constraints, "Current log path:", "Not resolved yet");
         websocketValue = addStatusRow(statusPanel, constraints, "WebSocket URL:", websocketUrl);
         lastActivityValue = addStatusRow(statusPanel, constraints, "Last log activity:", "Unknown");
+        authStatusValue = addStatusRow(statusPanel, constraints, "Twitch channel:", "Not logged in");
 
         root.add(statusPanel, BorderLayout.CENTER);
 
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        loginButton = new JButton("Login with Twitch");
+        loginButton.addActionListener(event -> loginWithTwitch());
         refreshButton = new JButton("Refresh Log");
         refreshButton.addActionListener(event -> refreshLog());
         stopButton = new JButton("Stop/Close");
         stopButton.addActionListener(event -> exitApplication());
+        actions.add(loginButton);
         actions.add(refreshButton);
         actions.add(stopButton);
         root.add(actions, BorderLayout.SOUTH);
@@ -186,10 +224,13 @@ public class MtgoBridgeLauncher {
         open.addActionListener(event -> showWindow());
         MenuItem refresh = new MenuItem("Refresh Log");
         refresh.addActionListener(event -> refreshLog());
+        logoutMenuItem = new MenuItem("Log out");
+        logoutMenuItem.addActionListener(event -> logout());
         MenuItem exit = new MenuItem("Exit");
         exit.addActionListener(event -> exitApplication());
         menu.add(open);
         menu.add(refresh);
+        menu.add(logoutMenuItem);
         menu.addSeparator();
         menu.add(exit);
 
@@ -213,9 +254,11 @@ public class MtgoBridgeLauncher {
                         .headless(false)
                         .run(args);
                 recordBoundPort();
+                applyBridgeConfigIfPresent();
                 registerShutdownHook();
                 SwingUtilities.invokeLater(() -> {
                     backendStatusValue.setText("Running");
+                    updateAuthUi();
                     setControlsEnabled(true);
                     startStatusTimer();
                     refreshLog();
@@ -253,6 +296,293 @@ public class MtgoBridgeLauncher {
                     updateStatus(status);
                     setControlsEnabled(true);
                 }));
+    }
+
+    private void loginWithTwitch() {
+        setControlsEnabled(false);
+        if (loginButton != null) {
+            loginButton.setText("Logging in...");
+        }
+
+        CompletableFuture.runAsync(() -> {
+            HttpServer callbackServer = null;
+            try {
+                BridgeAuthProperties authProperties = applicationContext.getBean(BridgeAuthProperties.class);
+                if (isBlank(authProperties.twitchClientId())) {
+                    throw new IllegalStateException("TWITCH_CLIENT_ID must be configured before login.");
+                }
+
+                PkcePair pkcePair = createPkcePair();
+                String state = randomHex(16);
+                CompletableFuture<String> authorizationCode = new CompletableFuture<>();
+                callbackServer = HttpServer.create(new InetSocketAddress("127.0.0.1", TWITCH_CALLBACK_PORT), 0);
+                int callbackPort = callbackServer.getAddress().getPort();
+                URI redirectUri = URI.create("http://localhost:%d%s".formatted(callbackPort, TWITCH_CALLBACK_PATH));
+                HttpServer server = callbackServer;
+                callbackServer.createContext(TWITCH_CALLBACK_PATH, exchange -> handleTwitchCallback(exchange, authorizationCode, state));
+                callbackServer.start();
+
+                openBrowser(twitchAuthorizeUri(authProperties.twitchClientId(), redirectUri, pkcePair.codeChallenge(), state));
+
+                String code = authorizationCode.get(60, TimeUnit.SECONDS);
+                server.stop(0);
+                callbackServer = null;
+
+                TwitchTokenResponse tokenResponse = exchangeTwitchCode(authProperties, redirectUri, code, pkcePair.codeVerifier());
+                IssuedBridgeToken issuedToken = issueBridgeToken(authProperties.issueBridgeTokenUrl(), tokenResponse.accessToken());
+                BridgeConfig config = new BridgeConfig(
+                        issuedToken.channelId(),
+                        issuedToken.channelId(),
+                        issuedToken.relayFunctionUrl(),
+                        issuedToken.bridgeToken()
+                );
+                saveBridgeConfig(config);
+                bridgeConfig = config;
+                configurePublisher(config);
+
+                SwingUtilities.invokeLater(() -> {
+                    updateAuthUi();
+                    setControlsEnabled(true);
+                    JOptionPane.showMessageDialog(frame, "Logged in as " + config.twitchLogin(), WINDOW_TITLE, JOptionPane.INFORMATION_MESSAGE);
+                });
+            } catch (BindException exception) {
+                if (callbackServer != null) {
+                    callbackServer.stop(0);
+                }
+                SwingUtilities.invokeLater(() -> {
+                    updateAuthUi();
+                    setControlsEnabled(true);
+                    JOptionPane.showMessageDialog(
+                            frame,
+                            "Twitch login could not start because localhost port %d is already in use.\n\nClose the other app using that port and try again.\n\nRegistered redirect URL:\nhttp://localhost:%d%s".formatted(
+                                    TWITCH_CALLBACK_PORT,
+                                    TWITCH_CALLBACK_PORT,
+                                    TWITCH_CALLBACK_PATH
+                            ),
+                            WINDOW_TITLE,
+                            JOptionPane.ERROR_MESSAGE
+                    );
+                });
+            } catch (Exception exception) {
+                if (callbackServer != null) {
+                    callbackServer.stop(0);
+                }
+                SwingUtilities.invokeLater(() -> {
+                    updateAuthUi();
+                    setControlsEnabled(true);
+                    JOptionPane.showMessageDialog(
+                            frame,
+                            "Twitch login failed:\n\n" + exception.getMessage(),
+                            WINDOW_TITLE,
+                            JOptionPane.ERROR_MESSAGE
+                    );
+                });
+            }
+        });
+    }
+
+    private void handleTwitchCallback(HttpExchange exchange, CompletableFuture<String> authorizationCode, String expectedState) throws IOException {
+        Map<String, String> query = parseQuery(exchange.getRequestURI().getRawQuery());
+        String code = query.get("code");
+        String error = query.get("error");
+        String state = query.get("state");
+
+        String responseText;
+        if (!expectedState.equals(state)) {
+            authorizationCode.completeExceptionally(new IllegalStateException("Twitch login state did not match."));
+            responseText = "MTGO Twitch Bridge login failed. You can close this window.";
+        } else if (!isBlank(code)) {
+            authorizationCode.complete(code);
+            responseText = "MTGO Twitch Bridge login complete. You can close this window.";
+        } else {
+            authorizationCode.completeExceptionally(new IllegalStateException(isBlank(error) ? "Twitch did not return an authorization code." : error));
+            responseText = "MTGO Twitch Bridge login failed. You can close this window.";
+        }
+
+        byte[] responseBytes = responseText.getBytes(StandardCharsets.UTF_8);
+        exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=utf-8");
+        exchange.sendResponseHeaders(200, responseBytes.length);
+        exchange.getResponseBody().write(responseBytes);
+        exchange.close();
+    }
+
+    private URI twitchAuthorizeUri(String clientId, URI redirectUri, String codeChallenge, String state) {
+        return URI.create("https://id.twitch.tv/oauth2/authorize?client_id=%s&redirect_uri=%s&response_type=code&scope=user:read:email&code_challenge=%s&code_challenge_method=S256&state=%s".formatted(
+                urlEncode(clientId),
+                urlEncode(redirectUri.toString()),
+                urlEncode(codeChallenge),
+                urlEncode(state)
+        ));
+    }
+
+    private TwitchTokenResponse exchangeTwitchCode(BridgeAuthProperties authProperties, URI redirectUri, String code, String codeVerifier) throws IOException, InterruptedException {
+        String formBody = "grant_type=authorization_code"
+                + "&client_id=" + urlEncode(authProperties.twitchClientId())
+                + "&code=" + urlEncode(code)
+                + "&redirect_uri=" + urlEncode(redirectUri.toString())
+                + "&code_verifier=" + urlEncode(codeVerifier);
+        HttpRequest request = HttpRequest.newBuilder(URI.create("https://id.twitch.tv/oauth2/token"))
+                .header("Content-Type", "application/x-www-form-urlencoded")
+                .POST(HttpRequest.BodyPublishers.ofString(formBody))
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IllegalStateException("Twitch token exchange failed with status " + response.statusCode());
+        }
+
+        return objectMapper.readValue(response.body(), TwitchTokenResponse.class);
+    }
+
+    private PkcePair createPkcePair() throws NoSuchAlgorithmException {
+        byte[] verifierBytes = new byte[32];
+        SECURE_RANDOM.nextBytes(verifierBytes);
+        String codeVerifier = Base64.getUrlEncoder().withoutPadding().encodeToString(verifierBytes);
+
+        byte[] hash = MessageDigest.getInstance("SHA-256")
+                .digest(codeVerifier.getBytes(StandardCharsets.US_ASCII));
+        String codeChallenge = Base64.getUrlEncoder().withoutPadding().encodeToString(hash);
+
+        return new PkcePair(codeVerifier, codeChallenge);
+    }
+
+    private String randomHex(int byteLength) {
+        byte[] bytes = new byte[byteLength];
+        SECURE_RANDOM.nextBytes(bytes);
+        return bytesToHex(bytes);
+    }
+
+    private String bytesToHex(byte[] bytes) {
+        StringBuilder builder = new StringBuilder(bytes.length * 2);
+        for (byte value : bytes) {
+            builder.append(String.format("%02x", value));
+        }
+        return builder.toString();
+    }
+
+    private IssuedBridgeToken issueBridgeToken(String issueBridgeTokenUrl, String twitchAccessToken) throws IOException, InterruptedException {
+        if (isBlank(issueBridgeTokenUrl)) {
+            throw new IllegalStateException("SUPABASE_ISSUE_TOKEN_URL is not configured.");
+        }
+
+        HttpRequest request = HttpRequest.newBuilder(URI.create(issueBridgeTokenUrl))
+                .header("Authorization", "Bearer " + twitchAccessToken)
+                .POST(HttpRequest.BodyPublishers.noBody())
+                .build();
+        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+
+        if (response.statusCode() < 200 || response.statusCode() >= 300) {
+            throw new IllegalStateException("Bridge token issue failed with status " + response.statusCode());
+        }
+
+        return objectMapper.readValue(response.body(), IssuedBridgeToken.class);
+    }
+
+    private void openBrowser(URI uri) throws IOException {
+        if (!Desktop.isDesktopSupported() || !Desktop.getDesktop().isSupported(Desktop.Action.BROWSE)) {
+            throw new IllegalStateException("Desktop browser launch is not supported on this system.");
+        }
+
+        Desktop.getDesktop().browse(uri);
+    }
+
+    private Map<String, String> parseQuery(String rawQuery) {
+        if (rawQuery == null || rawQuery.isBlank()) {
+            return Map.of();
+        }
+
+        java.util.HashMap<String, String> values = new java.util.HashMap<>();
+        for (String part : rawQuery.split("&")) {
+            int separator = part.indexOf('=');
+            String name = separator >= 0 ? part.substring(0, separator) : part;
+            String value = separator >= 0 ? part.substring(separator + 1) : "";
+            values.put(urlDecode(name), urlDecode(value));
+        }
+
+        return values;
+    }
+
+    private String urlEncode(String value) {
+        return URLEncoder.encode(value, StandardCharsets.UTF_8);
+    }
+
+    private String urlDecode(String value) {
+        return URLDecoder.decode(value, StandardCharsets.UTF_8);
+    }
+
+    private Optional<BridgeConfig> loadBridgeConfig() {
+        if (!Files.exists(CONFIG_PATH)) {
+            return Optional.empty();
+        }
+
+        Properties properties = new Properties();
+        try (java.io.Reader reader = Files.newBufferedReader(CONFIG_PATH, StandardCharsets.UTF_8)) {
+            properties.load(reader);
+        } catch (IOException exception) {
+            return Optional.empty();
+        }
+
+        BridgeConfig config = new BridgeConfig(
+                properties.getProperty(TWITCH_LOGIN_KEY, ""),
+                properties.getProperty(CHANNEL_ID_KEY, ""),
+                properties.getProperty(RELAY_FUNCTION_URL_KEY, ""),
+                properties.getProperty(BRIDGE_PUBLISH_TOKEN_KEY, "")
+        );
+
+        return config.isComplete() ? Optional.of(config) : Optional.empty();
+    }
+
+    private void saveBridgeConfig(BridgeConfig config) throws IOException {
+        Files.createDirectories(CONFIG_PATH.getParent());
+        Properties properties = new Properties();
+        properties.setProperty(TWITCH_LOGIN_KEY, config.twitchLogin());
+        properties.setProperty(CHANNEL_ID_KEY, config.channelId());
+        properties.setProperty(RELAY_FUNCTION_URL_KEY, config.relayFunctionUrl());
+        properties.setProperty(BRIDGE_PUBLISH_TOKEN_KEY, config.bridgePublishToken());
+
+        try (java.io.Writer writer = Files.newBufferedWriter(CONFIG_PATH, StandardCharsets.UTF_8)) {
+            properties.store(writer, "MTGO Twitch Bridge");
+        }
+    }
+
+    private void applyBridgeConfigIfPresent() {
+        if (bridgeConfig != null && bridgeConfig.isComplete()) {
+            configurePublisher(bridgeConfig);
+        }
+    }
+
+    private void configurePublisher(BridgeConfig config) {
+        applicationContext.getBean(SupabaseRelayPublisher.class)
+                .configure(config.channelId(), config.relayFunctionUrl(), config.bridgePublishToken());
+    }
+
+    private void logout() {
+        try {
+            Files.deleteIfExists(CONFIG_PATH);
+        } catch (IOException ignored) {
+            // Best effort: losing the in-memory token is enough for this process.
+        }
+
+        bridgeConfig = null;
+        ConfigurableApplicationContext context = applicationContext;
+        if (context != null && context.isActive()) {
+            context.getBean(SupabaseRelayPublisher.class).configure("", "", "");
+        }
+        updateAuthUi();
+    }
+
+    private void updateAuthUi() {
+        boolean authenticated = bridgeConfig != null && bridgeConfig.isComplete();
+        if (authStatusValue != null) {
+            authStatusValue.setText(authenticated ? bridgeConfig.twitchLogin() : "Not logged in");
+        }
+        if (loginButton != null) {
+            loginButton.setVisible(!authenticated);
+            loginButton.setText("Login with Twitch");
+        }
+        if (logoutMenuItem != null) {
+            logoutMenuItem.setEnabled(authenticated);
+        }
     }
 
     private LogWatchStatus parseStatus(HttpResponse<String> response) {
@@ -368,6 +698,9 @@ public class MtgoBridgeLauncher {
     private void setControlsEnabled(boolean enabled) {
         if (refreshButton != null) {
             refreshButton.setEnabled(enabled);
+        }
+        if (loginButton != null) {
+            loginButton.setEnabled(enabled && applicationContext != null && applicationContext.isActive());
         }
         if (stopButton != null) {
             stopButton.setEnabled(true);
@@ -508,5 +841,36 @@ public class MtgoBridgeLauncher {
         } catch (NumberFormatException exception) {
             return Optional.empty();
         }
+    }
+
+    private record BridgeConfig(
+            String twitchLogin,
+            String channelId,
+            String relayFunctionUrl,
+            String bridgePublishToken
+    ) {
+        private boolean isComplete() {
+            return !isBlank(twitchLogin)
+                    && !isBlank(channelId)
+                    && !isBlank(relayFunctionUrl)
+                    && !isBlank(bridgePublishToken);
+        }
+    }
+
+    private record TwitchTokenResponse(@JsonProperty("access_token") String accessToken) {
+    }
+
+    private record PkcePair(String codeVerifier, String codeChallenge) {
+    }
+
+    private record IssuedBridgeToken(
+            String channelId,
+            String bridgeToken,
+            String relayFunctionUrl
+    ) {
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
     }
 }
