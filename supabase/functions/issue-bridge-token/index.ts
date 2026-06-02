@@ -1,5 +1,5 @@
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const SUPABASE_ADMIN_KEY = Deno.env.get("MTGO_SUPABASE_SECRET_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const TWITCH_CLIENT_ID = Deno.env.get("TWITCH_CLIENT_ID") ?? "";
 const TWITCH_CLIENT_SECRET = Deno.env.get("TWITCH_CLIENT_SECRET") ?? "";
 
@@ -31,7 +31,7 @@ Deno.serve(async (request) => {
     return json({ error: "Method not allowed" }, 405);
   }
 
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !TWITCH_CLIENT_ID || !TWITCH_CLIENT_SECRET) {
+  if (!SUPABASE_URL || !SUPABASE_ADMIN_KEY || !TWITCH_CLIENT_ID || !TWITCH_CLIENT_SECRET) {
     return json({ error: "Token issuer is not configured" }, 500);
   }
 
@@ -165,11 +165,16 @@ function restUrl(table: string) {
 }
 
 function supabaseHeaders() {
-  return {
+  const headers: Record<string, string> = {
     "content-type": "application/json",
-    "apikey": SUPABASE_SERVICE_ROLE_KEY,
-    "authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
+    "apikey": SUPABASE_ADMIN_KEY
   };
+
+  headers.authorization = SUPABASE_ADMIN_KEY.startsWith("sb_secret_")
+    ? SUPABASE_ADMIN_KEY
+    : `Bearer ${SUPABASE_ADMIN_KEY}`;
+
+  return headers;
 }
 
 function sanitizeChannelId(channelId: unknown) {

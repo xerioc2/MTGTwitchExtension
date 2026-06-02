@@ -11,11 +11,13 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     emptyOutDir: true,
+    minify: false,
     rollupOptions: {
       input: {
         index: resolve(projectRoot, 'index.html'),
         twitch: resolve(projectRoot, 'twitch.html'),
-        overlay: resolve(projectRoot, 'overlay.html')
+        overlay: resolve(projectRoot, 'overlay.html'),
+        config: resolve(projectRoot, 'config.html')
       }
     }
   },

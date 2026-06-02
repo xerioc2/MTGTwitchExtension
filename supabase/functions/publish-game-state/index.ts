@@ -1,5 +1,5 @@
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const SUPABASE_ADMIN_KEY = Deno.env.get("MTGO_SUPABASE_SECRET_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const GAME_STATE_EVENT = "game-state";
 
 type PublishRequest = {
@@ -23,7 +23,7 @@ Deno.serve(async (request) => {
     return json({ error: "Unauthorized" }, 401);
   }
 
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
+  if (!SUPABASE_URL || !SUPABASE_ADMIN_KEY) {
     return json({ error: "Relay is not configured" }, 500);
   }
 
@@ -52,8 +52,7 @@ Deno.serve(async (request) => {
     method: "POST",
     headers: {
       "content-type": "application/json",
-      "apikey": SUPABASE_SERVICE_ROLE_KEY,
-      "authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
+      ...supabaseHeaders()
     },
     body: JSON.stringify({
       messages: [
@@ -83,8 +82,7 @@ async function findStreamerRelay(bridgeTokenHash: string) {
 
   const response = await fetch(`${SUPABASE_URL.replace(/\/+$/, "")}/rest/v1/streamer_relays?${params}`, {
     headers: {
-      "apikey": SUPABASE_SERVICE_ROLE_KEY,
-      "authorization": `Bearer ${SUPABASE_SERVICE_ROLE_KEY}`
+      ...supabaseHeaders()
     }
   });
 
@@ -114,6 +112,18 @@ function sanitizeChannelId(channelId: unknown) {
 
   const trimmed = channelId.trim().toLowerCase();
   return /^[a-z0-9_]{3,32}$/.test(trimmed) ? trimmed : "";
+}
+
+function supabaseHeaders() {
+  const headers: Record<string, string> = {
+    "apikey": SUPABASE_ADMIN_KEY
+  };
+
+  headers.authorization = SUPABASE_ADMIN_KEY.startsWith("sb_secret_")
+    ? SUPABASE_ADMIN_KEY
+    : `Bearer ${SUPABASE_ADMIN_KEY}`;
+
+  return headers;
 }
 
 function json(body: unknown, status = 200) {

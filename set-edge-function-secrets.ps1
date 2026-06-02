@@ -36,11 +36,16 @@ function Read-EnvFile($Path) {
 
 $rootEnv = Read-EnvFile $EnvFile
 
+$supabaseSecretKey = $rootEnv["MTGO_SUPABASE_SECRET_KEY"]
 $twitchClientId = $rootEnv["TWITCH_CLIENT_ID"]
 $twitchClientSecret = $rootEnv["TWITCH_CLIENT_SECRET"]
 
 if (-not $env:SUPABASE_ACCESS_TOKEN) {
     throw "SUPABASE_ACCESS_TOKEN is not set. Create a Supabase access token, set it in this PowerShell session, then rerun this script."
+}
+
+if (-not $supabaseSecretKey) {
+    throw "MTGO_SUPABASE_SECRET_KEY was not found in $EnvFile."
 }
 
 if (-not $twitchClientId) {
@@ -57,6 +62,7 @@ if (-not (Test-Path -LiteralPath $supabase)) {
 }
 
 & $supabase secrets set --project-ref lgzmxstmqzwjbmurstye `
+    "MTGO_SUPABASE_SECRET_KEY=$supabaseSecretKey" `
     "TWITCH_CLIENT_ID=$twitchClientId" `
     "TWITCH_CLIENT_SECRET=$twitchClientSecret"
 
