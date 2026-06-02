@@ -170,9 +170,7 @@ function supabaseHeaders() {
     "apikey": SUPABASE_ADMIN_KEY
   };
 
-  headers.authorization = SUPABASE_ADMIN_KEY.startsWith("sb_secret_")
-    ? SUPABASE_ADMIN_KEY
-    : `Bearer ${SUPABASE_ADMIN_KEY}`;
+  headers.authorization = `Bearer ${SUPABASE_ADMIN_KEY}`;
 
   return headers;
 }
