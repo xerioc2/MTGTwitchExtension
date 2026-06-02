@@ -36,19 +36,19 @@ function Read-EnvFile($Path) {
 
 $rootEnv = Read-EnvFile $EnvFile
 
-$serviceRoleKey = $rootEnv["SUPABASE_SERVICE_ROLE_KEY"]
 $twitchClientId = $rootEnv["TWITCH_CLIENT_ID"]
+$twitchClientSecret = $rootEnv["TWITCH_CLIENT_SECRET"]
 
 if (-not $env:SUPABASE_ACCESS_TOKEN) {
     throw "SUPABASE_ACCESS_TOKEN is not set. Create a Supabase access token, set it in this PowerShell session, then rerun this script."
 }
 
-if (-not $serviceRoleKey) {
-    throw "SUPABASE_SERVICE_ROLE_KEY was not found in $EnvFile."
-}
-
 if (-not $twitchClientId) {
     throw "TWITCH_CLIENT_ID was not found in $EnvFile."
+}
+
+if (-not $twitchClientSecret) {
+    throw "TWITCH_CLIENT_SECRET was not found in $EnvFile."
 }
 
 $supabase = Join-Path $env:USERPROFILE "scoop/shims/supabase.exe"
@@ -57,9 +57,8 @@ if (-not (Test-Path -LiteralPath $supabase)) {
 }
 
 & $supabase secrets set --project-ref lgzmxstmqzwjbmurstye `
-    "SUPABASE_URL=https://lgzmxstmqzwjbmurstye.supabase.co" `
-    "SUPABASE_SERVICE_ROLE_KEY=$serviceRoleKey" `
-    "TWITCH_CLIENT_ID=$twitchClientId"
+    "TWITCH_CLIENT_ID=$twitchClientId" `
+    "TWITCH_CLIENT_SECRET=$twitchClientSecret"
 
 if ($LASTEXITCODE -ne 0) {
     throw "supabase secrets set failed with exit code $LASTEXITCODE"

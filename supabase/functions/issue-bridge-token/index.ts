@@ -1,6 +1,17 @@
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const TWITCH_CLIENT_ID = Deno.env.get("TWITCH_CLIENT_ID") ?? "";
+const TWITCH_CLIENT_SECRET = Deno.env.get("TWITCH_CLIENT_SECRET") ?? "";
+
+type IssueBridgeTokenRequest = {
+  code?: string;
+  codeVerifier?: string;
+  redirectUri?: string;
+};
+
+type TwitchTokenResponse = {
+  access_token?: string;
+};
 
 type TwitchUsersResponse = {
   data?: TwitchUser[];
@@ -20,13 +31,18 @@ Deno.serve(async (request) => {
     return json({ error: "Method not allowed" }, 405);
   }
 
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !TWITCH_CLIENT_ID) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !TWITCH_CLIENT_ID || !TWITCH_CLIENT_SECRET) {
     return json({ error: "Token issuer is not configured" }, 500);
   }
 
-  const twitchAccessToken = bearerToken(request);
+  const body = await parseRequestBody(request);
+  if (!body?.code || !body.codeVerifier || !body.redirectUri) {
+    return json({ error: "code, codeVerifier, and redirectUri are required" }, 400);
+  }
+
+  const twitchAccessToken = await exchangeTwitchCode(body.code, body.codeVerifier, body.redirectUri);
   if (!twitchAccessToken) {
-    return json({ error: "Unauthorized" }, 401);
+    return json({ error: "Twitch token exchange failed" }, 401);
   }
 
   const twitchUser = await verifyTwitchUser(twitchAccessToken);
@@ -77,6 +93,40 @@ Deno.serve(async (request) => {
   });
 });
 
+async function parseRequestBody(request: Request) {
+  try {
+    return await request.json() as IssueBridgeTokenRequest;
+  } catch {
+    return null;
+  }
+}
+
+async function exchangeTwitchCode(code: string, codeVerifier: string, redirectUri: string) {
+  const formBody = new URLSearchParams({
+    grant_type: "authorization_code",
+    client_id: TWITCH_CLIENT_ID,
+    client_secret: TWITCH_CLIENT_SECRET,
+    code,
+    code_verifier: codeVerifier,
+    redirect_uri: redirectUri
+  });
+
+  const response = await fetch("https://id.twitch.tv/oauth2/token", {
+    method: "POST",
+    headers: {
+      "content-type": "application/x-www-form-urlencoded"
+    },
+    body: formBody
+  });
+
+  if (!response.ok) {
+    return null;
+  }
+
+  const payload = await response.json() as TwitchTokenResponse;
+  return payload.access_token ?? null;
+}
+
 async function verifyTwitchUser(accessToken: string) {
   const response = await fetch("https://api.twitch.tv/helix/users", {
     headers: {
@@ -91,11 +141,6 @@ async function verifyTwitchUser(accessToken: string) {
 
   const payload = await response.json() as TwitchUsersResponse;
   return payload.data?.[0] ?? null;
-}
-
-function bearerToken(request: Request) {
-  const authorization = request.headers.get("authorization") ?? "";
-  return authorization.replace(/^Bearer\s+/i, "").trim();
 }
 
 function randomHexToken(byteLength: number) {
@@ -140,7 +185,7 @@ function corsHeaders() {
   return {
     "access-control-allow-origin": "*",
     "access-control-allow-methods": "POST, OPTIONS",
-    "access-control-allow-headers": "authorization, content-type"
+    "access-control-allow-headers": "content-type"
   };
 }
 

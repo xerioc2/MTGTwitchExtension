@@ -1,7 +1,6 @@
 package com.mtgtwitch.extension.desktop;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.annotation.JsonProperty;
 import com.mtgtwitch.extension.MtgoTwitchExtensionApplication;
 import com.mtgtwitch.extension.log.LogWatchStatus;
 import com.mtgtwitch.extension.relay.SupabaseRelayPublisher;
@@ -328,8 +327,12 @@ public class MtgoBridgeLauncher {
                 server.stop(0);
                 callbackServer = null;
 
-                TwitchTokenResponse tokenResponse = exchangeTwitchCode(authProperties, redirectUri, code, pkcePair.codeVerifier());
-                IssuedBridgeToken issuedToken = issueBridgeToken(authProperties.issueBridgeTokenUrl(), tokenResponse.accessToken());
+                IssuedBridgeToken issuedToken = issueBridgeToken(
+                        authProperties.issueBridgeTokenUrl(),
+                        code,
+                        pkcePair.codeVerifier(),
+                        redirectUri.toString()
+                );
                 BridgeConfig config = new BridgeConfig(
                         issuedToken.channelId(),
                         issuedToken.channelId(),
@@ -415,25 +418,6 @@ public class MtgoBridgeLauncher {
         ));
     }
 
-    private TwitchTokenResponse exchangeTwitchCode(BridgeAuthProperties authProperties, URI redirectUri, String code, String codeVerifier) throws IOException, InterruptedException {
-        String formBody = "grant_type=authorization_code"
-                + "&client_id=" + urlEncode(authProperties.twitchClientId())
-                + "&code=" + urlEncode(code)
-                + "&redirect_uri=" + urlEncode(redirectUri.toString())
-                + "&code_verifier=" + urlEncode(codeVerifier);
-        HttpRequest request = HttpRequest.newBuilder(URI.create("https://id.twitch.tv/oauth2/token"))
-                .header("Content-Type", "application/x-www-form-urlencoded")
-                .POST(HttpRequest.BodyPublishers.ofString(formBody))
-                .build();
-        HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
-
-        if (response.statusCode() < 200 || response.statusCode() >= 300) {
-            throw new IllegalStateException("Twitch token exchange failed with status " + response.statusCode());
-        }
-
-        return objectMapper.readValue(response.body(), TwitchTokenResponse.class);
-    }
-
     private PkcePair createPkcePair() throws NoSuchAlgorithmException {
         byte[] verifierBytes = new byte[32];
         SECURE_RANDOM.nextBytes(verifierBytes);
@@ -460,14 +444,15 @@ public class MtgoBridgeLauncher {
         return builder.toString();
     }
 
-    private IssuedBridgeToken issueBridgeToken(String issueBridgeTokenUrl, String twitchAccessToken) throws IOException, InterruptedException {
+    private IssuedBridgeToken issueBridgeToken(String issueBridgeTokenUrl, String code, String codeVerifier, String redirectUri) throws IOException, InterruptedException {
         if (isBlank(issueBridgeTokenUrl)) {
             throw new IllegalStateException("SUPABASE_ISSUE_TOKEN_URL is not configured.");
         }
 
+        String requestBody = objectMapper.writeValueAsString(new IssueBridgeTokenRequest(code, codeVerifier, redirectUri));
         HttpRequest request = HttpRequest.newBuilder(URI.create(issueBridgeTokenUrl))
-                .header("Authorization", "Bearer " + twitchAccessToken)
-                .POST(HttpRequest.BodyPublishers.noBody())
+                .header("Content-Type", "application/json")
+                .POST(HttpRequest.BodyPublishers.ofString(requestBody))
                 .build();
         HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
 
@@ -857,10 +842,14 @@ public class MtgoBridgeLauncher {
         }
     }
 
-    private record TwitchTokenResponse(@JsonProperty("access_token") String accessToken) {
+    private record PkcePair(String codeVerifier, String codeChallenge) {
     }
 
-    private record PkcePair(String codeVerifier, String codeChallenge) {
+    private record IssueBridgeTokenRequest(
+            String code,
+            String codeVerifier,
+            String redirectUri
+    ) {
     }
 
     private record IssuedBridgeToken(
