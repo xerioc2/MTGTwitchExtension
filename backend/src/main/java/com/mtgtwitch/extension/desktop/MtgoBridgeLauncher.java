@@ -11,6 +11,7 @@ import org.springframework.context.ConfigurableApplicationContext;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
+import javax.swing.JCheckBox;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
 import javax.swing.JOptionPane;
@@ -96,8 +97,10 @@ public class MtgoBridgeLauncher {
     private JLabel lastActivityValue;
     private JLabel authStatusValue;
     private JButton loginButton;
+    private JButton logoutButton;
     private JButton refreshButton;
     private JButton stopButton;
+    private JCheckBox rememberLoginCheckbox;
     private MenuItem logoutMenuItem;
     private TrayIcon trayIcon;
     private Timer statusTimer;
@@ -141,8 +144,8 @@ public class MtgoBridgeLauncher {
     private void createWindow() {
         frame = new JFrame(WINDOW_TITLE);
         frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
-        frame.setSize(520, 300);
-        frame.setMinimumSize(new Dimension(480, 280));
+        frame.setSize(560, 340);
+        frame.setMinimumSize(new Dimension(520, 320));
         frame.setLocationRelativeTo(null);
 
         JPanel root = new JPanel(new BorderLayout(12, 12));
@@ -170,13 +173,18 @@ public class MtgoBridgeLauncher {
         root.add(statusPanel, BorderLayout.CENTER);
 
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT));
+        rememberLoginCheckbox = new JCheckBox("Remember login", true);
         loginButton = new JButton("Login with Twitch");
         loginButton.addActionListener(event -> loginWithTwitch());
+        logoutButton = new JButton("Log out");
+        logoutButton.addActionListener(event -> logout());
         refreshButton = new JButton("Refresh Log");
         refreshButton.addActionListener(event -> refreshLog());
         stopButton = new JButton("Stop/Close");
         stopButton.addActionListener(event -> exitApplication());
+        actions.add(rememberLoginCheckbox);
         actions.add(loginButton);
+        actions.add(logoutButton);
         actions.add(refreshButton);
         actions.add(stopButton);
         root.add(actions, BorderLayout.SOUTH);
@@ -339,14 +347,24 @@ public class MtgoBridgeLauncher {
                         issuedToken.relayFunctionUrl(),
                         issuedToken.bridgeToken()
                 );
-                saveBridgeConfig(config);
+                boolean rememberLogin = rememberLoginCheckbox == null || rememberLoginCheckbox.isSelected();
+                if (rememberLogin) {
+                    saveBridgeConfig(config);
+                } else {
+                    deleteBridgeConfig();
+                }
                 bridgeConfig = config;
                 configurePublisher(config);
 
                 SwingUtilities.invokeLater(() -> {
                     updateAuthUi();
                     setControlsEnabled(true);
-                    JOptionPane.showMessageDialog(frame, "Logged in as " + config.twitchLogin(), WINDOW_TITLE, JOptionPane.INFORMATION_MESSAGE);
+                    JOptionPane.showMessageDialog(
+                            frame,
+                            "Logged in as " + config.twitchLogin() + (rememberLogin ? "" : "\n\nThis login will be forgotten when the bridge closes."),
+                            WINDOW_TITLE,
+                            JOptionPane.INFORMATION_MESSAGE
+                    );
                 });
             } catch (BindException exception) {
                 if (callbackServer != null) {
@@ -542,11 +560,7 @@ public class MtgoBridgeLauncher {
     }
 
     private void logout() {
-        try {
-            Files.deleteIfExists(CONFIG_PATH);
-        } catch (IOException ignored) {
-            // Best effort: losing the in-memory token is enough for this process.
-        }
+        deleteBridgeConfig();
 
         bridgeConfig = null;
         ConfigurableApplicationContext context = applicationContext;
@@ -554,6 +568,14 @@ public class MtgoBridgeLauncher {
             context.getBean(SupabaseRelayPublisher.class).configure("", "", "");
         }
         updateAuthUi();
+    }
+
+    private void deleteBridgeConfig() {
+        try {
+            Files.deleteIfExists(CONFIG_PATH);
+        } catch (IOException ignored) {
+            // Best effort: losing the in-memory token is enough for this process.
+        }
     }
 
     private void updateAuthUi() {
@@ -565,8 +587,18 @@ public class MtgoBridgeLauncher {
             loginButton.setVisible(!authenticated);
             loginButton.setText("Login with Twitch");
         }
+        if (logoutButton != null) {
+            logoutButton.setVisible(authenticated);
+        }
+        if (rememberLoginCheckbox != null) {
+            rememberLoginCheckbox.setVisible(!authenticated);
+        }
         if (logoutMenuItem != null) {
             logoutMenuItem.setEnabled(authenticated);
+        }
+        if (frame != null) {
+            frame.revalidate();
+            frame.repaint();
         }
     }
 
@@ -686,6 +718,12 @@ public class MtgoBridgeLauncher {
         }
         if (loginButton != null) {
             loginButton.setEnabled(enabled && applicationContext != null && applicationContext.isActive());
+        }
+        if (logoutButton != null) {
+            logoutButton.setEnabled(enabled && bridgeConfig != null && bridgeConfig.isComplete());
+        }
+        if (rememberLoginCheckbox != null) {
+            rememberLoginCheckbox.setEnabled(enabled);
         }
         if (stopButton != null) {
             stopButton.setEnabled(true);
