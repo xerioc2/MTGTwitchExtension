@@ -560,6 +560,8 @@ public class MtgoBridgeLauncher {
     }
 
     private void logout() {
+        BridgeConfig configToRevoke = bridgeConfig;
+        revokeBridgeToken(configToRevoke);
         deleteBridgeConfig();
 
         bridgeConfig = null;
@@ -568,6 +570,27 @@ public class MtgoBridgeLauncher {
             context.getBean(SupabaseRelayPublisher.class).configure("", "", "");
         }
         updateAuthUi();
+    }
+
+    private void revokeBridgeToken(BridgeConfig config) {
+        if (config == null || !config.isComplete() || isBlank(config.relayFunctionUrl())) {
+            return;
+        }
+
+        CompletableFuture.runAsync(() -> {
+            try {
+                HttpRequest request = HttpRequest.newBuilder(URI.create(config.relayFunctionUrl()))
+                        .header("Authorization", "Bearer " + config.bridgePublishToken())
+                        .DELETE()
+                        .build();
+                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                    System.err.println("Bridge token revoke failed with status " + response.statusCode());
+                }
+            } catch (Exception exception) {
+                System.err.println("Bridge token revoke failed: " + exception.getMessage());
+            }
+        });
     }
 
     private void deleteBridgeConfig() {
@@ -588,7 +611,8 @@ public class MtgoBridgeLauncher {
             loginButton.setText("Login with Twitch");
         }
         if (logoutButton != null) {
-            logoutButton.setVisible(authenticated);
+            logoutButton.setVisible(true);
+            logoutButton.setEnabled(authenticated);
         }
         if (rememberLoginCheckbox != null) {
             rememberLoginCheckbox.setVisible(!authenticated);

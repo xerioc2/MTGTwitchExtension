@@ -12,12 +12,11 @@ type StreamerRelayRow = {
 };
 
 Deno.serve(async (request) => {
-  if (request.method !== "POST") {
+  if (request.method !== "POST" && request.method !== "DELETE") {
     return json({ error: "Method not allowed" }, 405);
   }
 
-  const authorization = request.headers.get("authorization") ?? "";
-  const token = authorization.replace(/^Bearer\s+/i, "").trim();
+  const token = bearerToken(request);
 
   if (!token) {
     return json({ error: "Unauthorized" }, 401);
@@ -25,6 +24,12 @@ Deno.serve(async (request) => {
 
   if (!SUPABASE_URL || !SUPABASE_ADMIN_KEY) {
     return json({ error: "Relay is not configured" }, 500);
+  }
+
+  const tokenHash = await sha256Hex(token);
+
+  if (request.method === "DELETE") {
+    return revokeStreamerRelay(tokenHash);
   }
 
   let payload: PublishRequest;
@@ -38,7 +43,7 @@ Deno.serve(async (request) => {
     return json({ error: "gameState is required" }, 400);
   }
 
-  const relay = await findStreamerRelay(await sha256Hex(token));
+  const relay = await findStreamerRelay(tokenHash);
   if (!relay) {
     return json({ error: "Unauthorized" }, 401);
   }
@@ -72,6 +77,11 @@ Deno.serve(async (request) => {
   return json({ ok: true, channelId });
 });
 
+function bearerToken(request: Request) {
+  const authorization = request.headers.get("authorization") ?? "";
+  return authorization.replace(/^Bearer\s+/i, "").trim();
+}
+
 async function findStreamerRelay(bridgeTokenHash: string) {
   const params = new URLSearchParams({
     bridge_token_hash: `eq.${bridgeTokenHash}`,
@@ -92,6 +102,31 @@ async function findStreamerRelay(bridgeTokenHash: string) {
 
   const rows = await response.json() as StreamerRelayRow[];
   return rows[0] ?? null;
+}
+
+async function revokeStreamerRelay(bridgeTokenHash: string) {
+  const params = new URLSearchParams({
+    bridge_token_hash: `eq.${bridgeTokenHash}`,
+    revoked_at: "is.null"
+  });
+
+  const response = await fetch(`${SUPABASE_URL.replace(/\/+$/, "")}/rest/v1/streamer_relays?${params}`, {
+    method: "PATCH",
+    headers: {
+      "content-type": "application/json",
+      "prefer": "return=minimal",
+      ...supabaseHeaders()
+    },
+    body: JSON.stringify({
+      revoked_at: new Date().toISOString()
+    })
+  });
+
+  if (!response.ok) {
+    return json({ error: "Failed to revoke bridge token" }, 502);
+  }
+
+  return json({ ok: true });
 }
 
 async function sha256Hex(value: string) {
