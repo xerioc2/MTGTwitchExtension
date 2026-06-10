@@ -27,12 +27,14 @@ if ($LASTEXITCODE -ne 0) {
 
 $packageDir = Join-Path $projectRoot "dist\windows-package"
 $inputDir = Join-Path $projectRoot "target\jpackage-input"
+$resourceDir = Join-Path $projectRoot "src\main\jpackage"
 if (Test-Path $packageDir) {
     Remove-Item -LiteralPath $packageDir -Recurse -Force
 }
 New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
 New-Item -ItemType Directory -Force -Path $inputDir | Out-Null
 Copy-Item -Path (Join-Path $projectRoot "target\mtgo-twitch-bridge.jar") -Destination $inputDir -Force
+$iconPath = Join-Path $projectRoot "src\main\resources\icons\bridge-icon.ico"
 
 $jpackageArgs = @(
     "--type", $Type,
@@ -44,6 +46,14 @@ $jpackageArgs = @(
     "--main-jar", "mtgo-twitch-bridge.jar",
     "--dest", $packageDir
 )
+
+if (Test-Path $resourceDir) {
+    $jpackageArgs += @("--resource-dir", $resourceDir)
+}
+
+if (Test-Path $iconPath) {
+    $jpackageArgs += @("--icon", $iconPath)
+}
 
 if ($Type -eq "exe") {
     $jpackageArgs += @("--win-menu", "--win-shortcut")

@@ -38,6 +38,7 @@ import java.awt.event.WindowAdapter;
 import java.awt.event.WindowEvent;
 import java.awt.event.WindowStateListener;
 import java.io.IOException;
+import java.io.InputStream;
 import java.net.BindException;
 import java.net.InetSocketAddress;
 import java.net.URLDecoder;
@@ -63,10 +64,12 @@ import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import javax.imageio.ImageIO;
 
 public class MtgoBridgeLauncher {
 
     private static final String WINDOW_TITLE = "MTGO Twitch Bridge";
+    private static final String APP_ICON_RESOURCE = "/icons/bridge-icon.png";
     private static final String MESSAGE = "Open MTGO first, then start the bridge. If MTGO updates or the log is not found, click Refresh Log.";
     private static final int DEFAULT_PORT = 8080;
     private static final int MAX_PORT = 8090;
@@ -103,6 +106,7 @@ public class MtgoBridgeLauncher {
     private JCheckBox rememberLoginCheckbox;
     private MenuItem logoutMenuItem;
     private TrayIcon trayIcon;
+    private Image appIconImage;
     private Timer statusTimer;
     private ConfigurableApplicationContext applicationContext;
     private int serverPort = DEFAULT_PORT;
@@ -117,6 +121,7 @@ public class MtgoBridgeLauncher {
 
     private void start(String[] args) {
         bridgeConfig = loadBridgeConfig().orElse(null);
+        appIconImage = loadAppIcon();
 
         Optional<Integer> availablePort = findAvailablePort();
         if (availablePort.isEmpty()) {
@@ -143,6 +148,9 @@ public class MtgoBridgeLauncher {
 
     private void createWindow() {
         frame = new JFrame(WINDOW_TITLE);
+        if (appIconImage != null) {
+            frame.setIconImage(appIconImage);
+        }
         frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
         frame.setSize(560, 340);
         frame.setMinimumSize(new Dimension(520, 320));
@@ -778,17 +786,46 @@ public class MtgoBridgeLauncher {
     }
 
     private Image createTrayImage(boolean connected) {
-        int size = 16;
+        int size = 32;
         java.awt.image.BufferedImage image = new java.awt.image.BufferedImage(size, size, java.awt.image.BufferedImage.TYPE_INT_ARGB);
         Graphics2D graphics = image.createGraphics();
-        graphics.setColor(new Color(25, 25, 25, 0));
-        graphics.fillRect(0, 0, size, size);
+        graphics.setRenderingHint(
+                java.awt.RenderingHints.KEY_INTERPOLATION,
+                java.awt.RenderingHints.VALUE_INTERPOLATION_BICUBIC
+        );
+        graphics.setRenderingHint(
+                java.awt.RenderingHints.KEY_ANTIALIASING,
+                java.awt.RenderingHints.VALUE_ANTIALIAS_ON
+        );
+        if (appIconImage != null) {
+            graphics.drawImage(appIconImage, 0, 0, size, size, null);
+        } else {
+            graphics.setColor(new Color(25, 25, 25, 0));
+            graphics.fillRect(0, 0, size, size);
+            graphics.setColor(new Color(32, 29, 24));
+            graphics.fillRoundRect(2, 2, 28, 28, 6, 6);
+            graphics.setColor(new Color(247, 244, 238));
+            graphics.setFont(new Font(Font.SANS_SERIF, Font.BOLD, 13));
+            graphics.drawString("MT", 7, 21);
+        }
+
+        int dotSize = 11;
+        int dotX = size - dotSize - 2;
+        int dotY = size - dotSize - 2;
         graphics.setColor(connected ? new Color(53, 190, 115) : new Color(216, 70, 70));
-        graphics.fillOval(2, 2, 12, 12);
+        graphics.fillOval(dotX, dotY, dotSize, dotSize);
         graphics.setColor(new Color(30, 30, 30));
-        graphics.drawOval(2, 2, 12, 12);
+        graphics.drawOval(dotX, dotY, dotSize, dotSize);
         graphics.dispose();
         return image;
+    }
+
+    private Image loadAppIcon() {
+        try (InputStream stream = MtgoBridgeLauncher.class.getResourceAsStream(APP_ICON_RESOURCE)) {
+            return stream == null ? null : ImageIO.read(stream);
+        } catch (IOException exception) {
+            return null;
+        }
     }
 
     private void exitApplication() {
