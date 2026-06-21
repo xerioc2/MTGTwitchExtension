@@ -25,6 +25,8 @@ node_modules/
 coverage/
 *.egg-info/
 frontend/magiccontent-*.zip
+frontend/dist-v2-screen-hover/
+frontend/twitch-packages/
 frontend/vite-*.log
 supabase/.temp/
 

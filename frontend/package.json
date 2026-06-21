@@ -6,6 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:v2-screen-hover": "node scripts/build-v2-screen-hover.mjs",
+    "package:v2-screen-hover": "node scripts/package-v2-screen-hover.mjs",
     "preview": "vite preview",
     "lint": "eslint ."
   },
