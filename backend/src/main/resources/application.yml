@@ -24,6 +24,10 @@ screen-detections:
   enabled: ${ENABLE_SCREEN_DETECTIONS:false}
   mock-enabled: ${ENABLE_SCREEN_DETECTIONS_MOCK:false}
   ttl: ${SCREEN_DETECTIONS_TTL:PT2S}
+  detector:
+    enabled: ${ENABLE_SCREEN_DETECTOR:false}
+    mode: ${SCREEN_DETECTOR_MODE:none}
+    min-interval: ${SCREEN_DETECTOR_MIN_INTERVAL:PT1S}
 
 supabase:
   url: ${SUPABASE_URL:https://lgzmxstmqzwjbmurstye.supabase.co}
