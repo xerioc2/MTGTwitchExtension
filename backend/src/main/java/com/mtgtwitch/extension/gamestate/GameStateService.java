@@ -1,5 +1,6 @@
 package com.mtgtwitch.extension.gamestate;
 
+import com.mtgtwitch.extension.detection.DetectionRegion;
 import com.mtgtwitch.extension.websocket.GameStateBroadcaster;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -23,6 +24,7 @@ public class GameStateService {
     private final GameStateBroadcaster gameStateBroadcaster;
     private Long gameId;
     private List<Integer> deckCatalogIds = List.of();
+    private List<DetectionRegion> detectionRegions = List.of();
     private List<PlayerState> players = List.of();
     private String localPlayerName;
 
@@ -78,7 +80,19 @@ public class GameStateService {
         return gameState;
     }
 
+    public synchronized GameState updateDetectionRegions(List<DetectionRegion> nextDetectionRegions) {
+        pruneExpiredDetectionRegions(Instant.now());
+        detectionRegions = List.copyOf(nextDetectionRegions);
+
+        GameState gameState = snapshot();
+        gameStateBroadcaster.broadcast(gameState);
+        return gameState;
+    }
+
     public synchronized GameState snapshot() {
+        Instant now = Instant.now();
+        pruneExpiredDetectionRegions(now);
+
         return new GameState(
                 List.copyOf(zones.get(Zone.HAND)),
                 List.copyOf(zones.get(Zone.BATTLEFIELD)),
@@ -91,7 +105,8 @@ public class GameStateService {
                 List.copyOf(players),
                 gameId,
                 List.copyOf(deckCatalogIds),
-                Instant.now()
+                List.copyOf(detectionRegions),
+                now
         );
     }
 
@@ -114,6 +129,7 @@ public class GameStateService {
         if (gameId != null && gameId != nextGameId) {
             clearTrackedZones();
             deckCatalogIds = List.of();
+            detectionRegions = List.of();
             players = List.of();
             localPlayerName = null;
         }
@@ -151,5 +167,11 @@ public class GameStateService {
                     zoneCards.get(zone).add(card);
                     zones.get(zone).add(card.displayName());
                 });
+    }
+
+    private void pruneExpiredDetectionRegions(Instant now) {
+        detectionRegions = detectionRegions.stream()
+                .filter(region -> region.expiresAt() != null && region.expiresAt().isAfter(now))
+                .toList();
     }
 }

@@ -1,5 +1,7 @@
 package com.mtgtwitch.extension.gamestate;
 
+import com.mtgtwitch.extension.detection.DetectionRegion;
+
 import java.time.Instant;
 import java.util.List;
 
@@ -15,6 +17,7 @@ public record GameState(
         List<PlayerState> players,
         Long gameId,
         List<Integer> deckCatalogIds,
+        List<DetectionRegion> detectionRegions,
         Instant updatedAt
 ) {
 }

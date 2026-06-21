@@ -126,6 +126,7 @@ class SupabaseRelayPublisherTests {
                 List.of(),
                 null,
                 List.of(),
+                List.of(),
                 Instant.parse("2026-05-31T00:00:00Z")
         );
     }

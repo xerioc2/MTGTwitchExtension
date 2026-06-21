@@ -20,6 +20,11 @@ mtgo:
 twitch:
   client-id: ${TWITCH_CLIENT_ID:i68wrrm8hl8qzvtbyupokyg0a8d9sd}
 
+screen-detections:
+  enabled: ${ENABLE_SCREEN_DETECTIONS:false}
+  mock-enabled: ${ENABLE_SCREEN_DETECTIONS_MOCK:false}
+  ttl: ${SCREEN_DETECTIONS_TTL:PT2S}
+
 supabase:
   url: ${SUPABASE_URL:https://lgzmxstmqzwjbmurstye.supabase.co}
   service-role-key: ${SUPABASE_SERVICE_ROLE_KEY:}

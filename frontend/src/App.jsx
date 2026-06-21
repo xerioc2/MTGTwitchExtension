@@ -2,6 +2,7 @@ import { Activity, ChevronDown, ChevronRight, CircleAlert, RefreshCw } from 'luc
 import { createClient } from '@supabase/supabase-js';
 import { Component, useCallback, useEffect, useMemo, useState } from 'react';
 import DebugPage from './DebugPage.jsx';
+import { useScreenDetections } from './screenDetections/useScreenDetections.js';
 
 const runtimeBackendUrls = resolveRuntimeBackendUrls();
 const websocketUrl = import.meta.env.VITE_BACKEND_WS_URL ?? runtimeBackendUrls.websocketUrl;
@@ -12,6 +13,7 @@ const supabaseConfig = {
   channelId: import.meta.env.VITE_SUPABASE_CHANNEL_ID ?? 'xerioc2'
 };
 const shouldUseSupabaseRelay = Boolean(supabaseConfig.url && supabaseConfig.anonKey);
+const enableScreenDetections = import.meta.env.VITE_ENABLE_SCREEN_DETECTIONS === 'true';
 const emptyGameState = {
   hand: [],
   battlefield: [],
@@ -22,6 +24,7 @@ const emptyGameState = {
   graveyardCards: [],
   exileCards: [],
   deckCatalogIds: [],
+  detectionRegions: [],
   gameId: null,
   updatedAt: null
 };
@@ -198,6 +201,10 @@ function ExtensionPanel({ isOverlay }) {
 
     return Array.from(catalogIds);
   }, [gameState]);
+  const screenDetectionRegions = useScreenDetections({
+    enabled: isOverlay && enableScreenDetections,
+    gameState
+  });
 
   useEffect(() => {
     let isCancelled = false;
@@ -280,6 +287,49 @@ function ExtensionPanel({ isOverlay }) {
     }
   }
 
+  async function handleDetectionRegionMouseEnter(region) {
+    const previewWidth = 226;
+    const catalogId = Number(region.catalogId);
+
+    if (!Number.isInteger(catalogId) || catalogId <= 0) {
+      setHoveredCard(null);
+      return;
+    }
+
+    const card = {
+      id: region.cardId ?? region.id,
+      catalogId,
+      name: region.cardName,
+      manaCost: '',
+      typeLine: region.zone,
+      oracleText: '',
+      imageUri: region.imageUrl ?? '',
+      quantity: 1
+    };
+    const regionLeft = region.bbox.x * window.innerWidth;
+    const regionTop = region.bbox.y * window.innerHeight;
+    const previewLeft = Math.min(
+      window.innerWidth - previewWidth - 10,
+      Math.max(8, regionLeft + (region.bbox.w * window.innerWidth) + 8)
+    );
+
+    setHoveredCard({
+      ...card,
+      top: Math.min(regionTop, window.innerHeight - 260),
+      left: previewLeft,
+      loading: card.catalogId > 0 && !cardDetailsByCatalogId[card.catalogId]
+    });
+
+    if (cardDetailsByCatalogId[card.catalogId]) {
+      return;
+    }
+
+    const details = await fetchCardDetails(card.catalogId, { cacheFailures: false });
+    setHoveredCard((current) => current?.catalogId === card.catalogId
+      ? { ...current, ...(details ?? buildPlaceholderCard(card)), loading: false }
+      : current);
+  }
+
   return (
     <main className={isOverlay ? 'extension-shell extension-overlay-shell' : 'extension-shell'}>
       <section className="extension-panel" aria-labelledby="extension-title">
@@ -352,6 +402,27 @@ function ExtensionPanel({ isOverlay }) {
           })}
         </div>
       </section>
+
+      {screenDetectionRegions.length > 0 && (
+        <div className="extension-detection-layer" aria-hidden="true">
+          {screenDetectionRegions.map((region) => (
+            <button
+              className="extension-detection-region"
+              type="button"
+              key={region.id}
+              style={{
+                left: `${region.bbox.x * 100}%`,
+                top: `${region.bbox.y * 100}%`,
+                width: `${region.bbox.w * 100}%`,
+                height: `${region.bbox.h * 100}%`
+              }}
+              onMouseEnter={() => handleDetectionRegionMouseEnter(region)}
+              onMouseLeave={() => setHoveredCard(null)}
+              tabIndex={-1}
+            />
+          ))}
+        </div>
+      )}
 
       {hoveredCard && (
         <CardPreview card={hoveredCard} cachedDetails={cardDetailsByCatalogId[hoveredCard.catalogId]} />
