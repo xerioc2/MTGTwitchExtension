@@ -1,5 +1,7 @@
 import { useMemo } from 'react';
 
+const HITBOX_PADDING = 0.02;
+
 export function useScreenDetections({ enabled, gameState }) {
   return useMemo(() => {
     if (!enabled) {
@@ -23,16 +25,32 @@ function isActiveRegion(region) {
 
 function normalizeRegion(region) {
   const bbox = region.bbox;
+  const normalizedBbox = {
+    x: clamp01(bbox.x),
+    y: clamp01(bbox.y),
+    w: clamp01(bbox.w),
+    h: clamp01(bbox.h)
+  };
 
   return {
     ...region,
     confidence: clamp01(region.confidence),
-    bbox: {
-      x: clamp01(bbox.x),
-      y: clamp01(bbox.y),
-      w: clamp01(bbox.w),
-      h: clamp01(bbox.h)
-    }
+    bbox: normalizedBbox,
+    hitbox: expandBbox(normalizedBbox, HITBOX_PADDING)
+  };
+}
+
+export function expandBbox(bbox, padding = HITBOX_PADDING) {
+  const x1 = clamp01(bbox.x - padding);
+  const y1 = clamp01(bbox.y - padding);
+  const x2 = clamp01(bbox.x + bbox.w + padding);
+  const y2 = clamp01(bbox.y + bbox.h + padding);
+
+  return {
+    x: x1,
+    y: y1,
+    w: Math.max(0, x2 - x1),
+    h: Math.max(0, y2 - y1)
   };
 }
 

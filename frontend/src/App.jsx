@@ -77,6 +77,15 @@ function ExtensionPanel({ isOverlay }) {
   const [isRescanning, setIsRescanning] = useState(false);
   const [collapsedZones, setCollapsedZones] = useState({});
   const [hoveredCard, setHoveredCard] = useState(null);
+  const [panelCard, setPanelCard] = useState(null);
+  const [lockedPanelCardKey, setLockedPanelCardKey] = useState(null);
+  const [pinPanel, setPinPanel] = useState(() => {
+    if (!enableScreenDetections) {
+      return false;
+    }
+
+    return window.localStorage.getItem('mtgtwitch.pinPanel') === 'true';
+  });
   const [cardDetailsByCatalogId, setCardDetailsByCatalogId] = useState({});
   const [failedCatalogIds, setFailedCatalogIds] = useState({});
 
@@ -232,6 +241,16 @@ function ExtensionPanel({ isOverlay }) {
   }, [cardDetailsByCatalogId, catalogIdsToResolve, failedCatalogIds, fetchCardDetails]);
 
   const isConnected = connectionState === 'connected';
+  const isPinnedPanelEnabled = enableScreenDetections && pinPanel;
+  const activePreviewCard = isPinnedPanelEnabled ? panelCard : hoveredCard;
+
+  useEffect(() => {
+    if (!enableScreenDetections) {
+      return;
+    }
+
+    window.localStorage.setItem('mtgtwitch.pinPanel', String(pinPanel));
+  }, [pinPanel]);
 
   async function handleReconnect() {
     setIsRescanning(true);
@@ -257,6 +276,98 @@ function ExtensionPanel({ isOverlay }) {
     }));
   }
 
+  function handlePinPanelChange(event) {
+    const nextPinPanel = event.target.checked;
+    setPinPanel(nextPinPanel);
+    setLockedPanelCardKey(null);
+
+    if (nextPinPanel) {
+      setPanelCard(hoveredCard);
+      setHoveredCard(null);
+    } else {
+      setPanelCard(null);
+    }
+  }
+
+  function handlePreviewMouseLeave() {
+    if (!isPinnedPanelEnabled) {
+      setHoveredCard(null);
+    }
+  }
+
+  function getPreviewKey(card) {
+    return `${card.catalogId ?? 'vision'}-${card.id ?? card.name}`;
+  }
+
+  function setPreviewCard(card) {
+    const previewKey = getPreviewKey(card);
+
+    if (isPinnedPanelEnabled) {
+      if (lockedPanelCardKey && lockedPanelCardKey !== previewKey) {
+        return false;
+      }
+
+      setPanelCard(card);
+      setHoveredCard(null);
+      return true;
+    }
+
+    setHoveredCard(card);
+    return true;
+  }
+
+  function updatePreviewCard(catalogId, getNextCard) {
+    if (isPinnedPanelEnabled) {
+      setPanelCard((current) => current?.catalogId === catalogId ? getNextCard(current) : current);
+      return;
+    }
+
+    setHoveredCard((current) => current?.catalogId === catalogId ? getNextCard(current) : current);
+  }
+
+  function handlePreviewClick(card) {
+    if (!isPinnedPanelEnabled) {
+      return;
+    }
+
+    const previewKey = getPreviewKey(card);
+
+    if (lockedPanelCardKey === previewKey) {
+      setLockedPanelCardKey(null);
+      return;
+    }
+
+    if (lockedPanelCardKey) {
+      return;
+    }
+
+    setPanelCard(panelCard && getPreviewKey(panelCard) === previewKey ? panelCard : card);
+    setLockedPanelCardKey(previewKey);
+  }
+
+  function handleUnlockPanel() {
+    setLockedPanelCardKey(null);
+  }
+
+  function handleClosePanel() {
+    setLockedPanelCardKey(null);
+    setPanelCard(null);
+  }
+
+  function buildDetectionRegionCard(region, catalogId, hasCatalogId) {
+    return {
+      id: hasCatalogId ? region.cardId ?? region.id : region.id ?? region.cardName,
+      catalogId: hasCatalogId ? catalogId : null,
+      name: region.cardName,
+      manaCost: '',
+      typeLine: region.zone,
+      oracleText: '',
+      imageUri: region.imageUrl ?? '',
+      imageUrl: region.imageUrl ?? '',
+      quantity: 1
+    };
+  }
+
   async function handleCardMouseEnter(card, event) {
     const rect = event.currentTarget.getBoundingClientRect();
     const previewWidth = 226;
@@ -264,12 +375,16 @@ function ExtensionPanel({ isOverlay }) {
       ? Math.max(8, rect.left - previewWidth - 8)
       : Math.min(rect.right + 8, window.innerWidth - previewWidth - 10);
 
-    setHoveredCard({
+    const didSetPreview = setPreviewCard({
       ...card,
       top: Math.min(rect.top, window.innerHeight - 260),
       left: previewLeft,
       loading: !cardDetailsByCatalogId[card.catalogId]
     });
+
+    if (!didSetPreview) {
+      return;
+    }
 
     if (!card.catalogId || cardDetailsByCatalogId[card.catalogId]) {
       return;
@@ -277,11 +392,11 @@ function ExtensionPanel({ isOverlay }) {
 
     const details = await fetchCardDetails(card.catalogId, { cacheFailures: false });
     if (details) {
-      setHoveredCard((current) => current?.catalogId === card.catalogId
+      updatePreviewCard(card.catalogId, (current) => current?.catalogId === card.catalogId
         ? { ...current, ...details, loading: false }
         : current);
     } else {
-      setHoveredCard((current) => current?.catalogId === card.catalogId
+      updatePreviewCard(card.catalogId, (current) => current?.catalogId === card.catalogId
         ? { ...current, ...buildPlaceholderCard(card), loading: false }
         : current);
     }
@@ -290,22 +405,9 @@ function ExtensionPanel({ isOverlay }) {
   async function handleDetectionRegionMouseEnter(region) {
     const previewWidth = 226;
     const catalogId = Number(region.catalogId);
+    const hasCatalogId = Number.isInteger(catalogId) && catalogId > 0;
 
-    if (!Number.isInteger(catalogId) || catalogId <= 0) {
-      setHoveredCard(null);
-      return;
-    }
-
-    const card = {
-      id: region.cardId ?? region.id,
-      catalogId,
-      name: region.cardName,
-      manaCost: '',
-      typeLine: region.zone,
-      oracleText: '',
-      imageUri: region.imageUrl ?? '',
-      quantity: 1
-    };
+    const card = buildDetectionRegionCard(region, catalogId, hasCatalogId);
     const regionLeft = region.bbox.x * window.innerWidth;
     const regionTop = region.bbox.y * window.innerHeight;
     const previewLeft = Math.min(
@@ -313,19 +415,27 @@ function ExtensionPanel({ isOverlay }) {
       Math.max(8, regionLeft + (region.bbox.w * window.innerWidth) + 8)
     );
 
-    setHoveredCard({
+    const didSetPreview = setPreviewCard({
       ...card,
       top: Math.min(regionTop, window.innerHeight - 260),
       left: previewLeft,
-      loading: card.catalogId > 0 && !cardDetailsByCatalogId[card.catalogId]
+      loading: hasCatalogId && !cardDetailsByCatalogId[card.catalogId]
     });
+
+    if (!didSetPreview) {
+      return;
+    }
+
+    if (!hasCatalogId) {
+      return;
+    }
 
     if (cardDetailsByCatalogId[card.catalogId]) {
       return;
     }
 
     const details = await fetchCardDetails(card.catalogId, { cacheFailures: false });
-    setHoveredCard((current) => current?.catalogId === card.catalogId
+    updatePreviewCard(card.catalogId, (current) => current?.catalogId === card.catalogId
       ? { ...current, ...(details ?? buildPlaceholderCard(card)), loading: false }
       : current);
   }
@@ -340,6 +450,17 @@ function ExtensionPanel({ isOverlay }) {
           </div>
 
           <div className="extension-actions">
+            {enableScreenDetections && (
+              <label className="extension-pin-toggle">
+                <input
+                  type="checkbox"
+                  checked={pinPanel}
+                  onChange={handlePinPanelChange}
+                />
+                <span>Pin card</span>
+              </label>
+            )}
+
             <button className="extension-icon-button" type="button" onClick={handleReconnect} disabled={isRescanning}>
               <RefreshCw aria-hidden="true" size={14} />
               <span>{isRescanning ? '...' : 'Reconnect'}</span>
@@ -382,7 +503,8 @@ function ExtensionPanel({ isOverlay }) {
                           type="button"
                           key={`${zone.key}-${card.catalogId}-${card.name}`}
                           onMouseEnter={(event) => handleCardMouseEnter(card, event)}
-                          onMouseLeave={() => setHoveredCard(null)}
+                          onMouseLeave={handlePreviewMouseLeave}
+                          onClick={() => handlePreviewClick(card)}
                         >
                           <span className="extension-quantity">{card.quantity}</span>
                           <span className="extension-card-main">
@@ -411,21 +533,33 @@ function ExtensionPanel({ isOverlay }) {
               type="button"
               key={region.id}
               style={{
-                left: `${region.bbox.x * 100}%`,
-                top: `${region.bbox.y * 100}%`,
-                width: `${region.bbox.w * 100}%`,
-                height: `${region.bbox.h * 100}%`
+                left: `${region.hitbox.x * 100}%`,
+                top: `${region.hitbox.y * 100}%`,
+                width: `${region.hitbox.w * 100}%`,
+                height: `${region.hitbox.h * 100}%`
               }}
               onMouseEnter={() => handleDetectionRegionMouseEnter(region)}
-              onMouseLeave={() => setHoveredCard(null)}
+              onMouseLeave={handlePreviewMouseLeave}
+              onClick={() => {
+                const clickCatalogId = Number(region.catalogId);
+                const hasClickCatalogId = Number.isInteger(clickCatalogId) && clickCatalogId > 0;
+                handlePreviewClick(buildDetectionRegionCard(region, clickCatalogId, hasClickCatalogId));
+              }}
               tabIndex={-1}
             />
           ))}
         </div>
       )}
 
-      {hoveredCard && (
-        <CardPreview card={hoveredCard} cachedDetails={cardDetailsByCatalogId[hoveredCard.catalogId]} />
+      {activePreviewCard && (
+        <CardPreview
+          card={activePreviewCard}
+          cachedDetails={activePreviewCard.catalogId ? cardDetailsByCatalogId[activePreviewCard.catalogId] : undefined}
+          docked={isPinnedPanelEnabled}
+          locked={Boolean(lockedPanelCardKey)}
+          onUnlock={handleUnlockPanel}
+          onClose={handleClosePanel}
+        />
       )}
     </main>
   );
@@ -494,12 +628,24 @@ function ManaCost({ manaCost }) {
   );
 }
 
-function CardPreview({ card, cachedDetails }) {
+function CardPreview({ card, cachedDetails, docked = false, locked = false, onUnlock, onClose }) {
   const details = { ...card, ...cachedDetails };
   const imageUri = details.imageUrl || details.normalImageUri || details.imageUri;
+  const className = docked
+    ? 'extension-card-preview extension-card-preview--docked'
+    : 'extension-card-preview';
+  const style = docked ? undefined : { top: card.top, left: card.left };
 
   return (
-    <aside className="extension-card-preview" style={{ top: card.top, left: card.left }}>
+    <aside className={className} style={style}>
+      {docked && (
+        <div className="extension-card-preview-toolbar">
+          <span>{locked ? 'Locked' : 'Pinned'}</span>
+          <button type="button" onClick={locked ? onUnlock : onClose}>
+            {locked ? 'Unlock' : 'Close'}
+          </button>
+        </div>
+      )}
       {imageUri ? (
         <img src={imageUri} alt={details.name} />
       ) : (
