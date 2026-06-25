@@ -1,0 +1,17 @@
+{
+  "name": "@mtgtwitch/vision",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.json --noEmit --pretty false",
+    "test": "npm run build && node --test dist/debug.test.js dist/gemini.test.js dist/regions.test.js dist/scryfall.test.js dist/twitch.test.js",
+    "scan": "npm run build && node dist/cli/scan.js",
+    "wire": "npm run build && node dist/cli/wire.js"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "typescript": "^5.8.0"
+  }
+}
