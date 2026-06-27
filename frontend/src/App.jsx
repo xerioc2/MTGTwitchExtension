@@ -14,6 +14,8 @@ const supabaseConfig = {
 };
 const shouldUseSupabaseRelay = Boolean(supabaseConfig.url && supabaseConfig.anonKey);
 const enableScreenDetections = import.meta.env.VITE_ENABLE_SCREEN_DETECTIONS === 'true';
+// manapool.com must be declared as an allowed external domain in Twitch extension capabilities.
+const MANA_POOL_REF = 'mtgcontent';
 const emptyGameState = {
   hand: [],
   battlefield: [],
@@ -61,6 +63,14 @@ function resolveRuntimeBackendUrls() {
     websocketUrl: `${wsProtocol}//${window.location.host}/ws/game-state`,
     backendApiUrl: `${window.location.protocol}//${window.location.host}`
   };
+}
+
+function manaPoolUrl(cardName) {
+  if (!cardName || cardName.startsWith('Catalog ID')) {
+    return null;
+  }
+
+  return `https://manapool.com/?q=${encodeURIComponent(cardName)}&ref=${MANA_POOL_REF}`;
 }
 
 export default function App() {
@@ -730,6 +740,19 @@ function CardPreview({ card, cachedDetails, docked = false, locked = false, onUn
         </div>
         <p>{details.typeLine || `Catalog ID ${details.catalogId}`}</p>
         <p>{details.oracleText || (details.loading ? 'Loading Scryfall card data...' : 'Card details unavailable')}</p>
+        {(() => {
+          const url = manaPoolUrl(details.name);
+          return url ? (
+            <a
+              className="extension-buy-link"
+              href={url}
+              target="_blank"
+              rel="noreferrer"
+            >
+              Buy on ManaPool
+            </a>
+          ) : null;
+        })()}
       </div>
     </aside>
   );

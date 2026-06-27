@@ -419,17 +419,44 @@ public class MtgoBridgeLauncher {
         String responseText;
         if (!expectedState.equals(state)) {
             authorizationCode.completeExceptionally(new IllegalStateException("Twitch login state did not match."));
-            responseText = "MTGO Twitch Bridge login failed. You can close this window.";
+            responseText = """
+                    <!doctype html><html lang="en"><head><meta charset="utf-8">
+                    <title>MTGO Twitch Bridge</title>
+                    <style>body{margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;
+                    font-family:sans-serif;background:#0e0e10;color:#efeff1}
+                    .box{text-align:center;padding:40px}h1{margin:0 0 12px;font-size:1.4rem;color:#f04747}
+                    p{margin:0;color:#adadb8;font-size:0.95rem}</style></head>
+                    <body><div class="box"><h1>Login failed</h1>
+                    <p>You can close this window. Check the bridge window for details.</p>
+                    </div></body></html>""";
         } else if (!isBlank(code)) {
             authorizationCode.complete(code);
-            responseText = "MTGO Twitch Bridge login complete. You can close this window.";
+            responseText = """
+                    <!doctype html><html lang="en"><head><meta charset="utf-8">
+                    <title>MTGO Twitch Bridge</title>
+                    <style>body{margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;
+                    font-family:sans-serif;background:#0e0e10;color:#efeff1}
+                    .box{text-align:center;padding:40px}h1{margin:0 0 12px;font-size:1.4rem;color:#a970ff}
+                    p{margin:0;color:#adadb8;font-size:0.95rem}</style></head>
+                    <body><div class="box"><h1>Login complete</h1>
+                    <p>You can close this window and return to the MTGO Twitch Bridge.</p>
+                    </div></body></html>""";
         } else {
             authorizationCode.completeExceptionally(new IllegalStateException(isBlank(error) ? "Twitch did not return an authorization code." : error));
-            responseText = "MTGO Twitch Bridge login failed. You can close this window.";
+            responseText = """
+                    <!doctype html><html lang="en"><head><meta charset="utf-8">
+                    <title>MTGO Twitch Bridge</title>
+                    <style>body{margin:0;display:flex;align-items:center;justify-content:center;min-height:100vh;
+                    font-family:sans-serif;background:#0e0e10;color:#efeff1}
+                    .box{text-align:center;padding:40px}h1{margin:0 0 12px;font-size:1.4rem;color:#f04747}
+                    p{margin:0;color:#adadb8;font-size:0.95rem}</style></head>
+                    <body><div class="box"><h1>Login failed</h1>
+                    <p>You can close this window. Check the bridge window for details.</p>
+                    </div></body></html>""";
         }
 
         byte[] responseBytes = responseText.getBytes(StandardCharsets.UTF_8);
-        exchange.getResponseHeaders().set("Content-Type", "text/plain; charset=utf-8");
+        exchange.getResponseHeaders().set("Content-Type", "text/html; charset=utf-8");
         exchange.sendResponseHeaders(200, responseBytes.length);
         exchange.getResponseBody().write(responseBytes);
         exchange.close();

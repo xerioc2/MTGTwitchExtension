@@ -410,6 +410,11 @@ textarea {
   box-shadow: -12px 0 38px rgba(0, 0, 0, 0.52);
 }
 
+.extension-overlay-shell .extension-card-preview--docked {
+  right: 334px;
+  width: min(270px, calc(100vw - 350px));
+}
+
 .extension-card-preview-toolbar {
   min-height: 30px;
   display: flex;
@@ -460,6 +465,26 @@ textarea {
 
 .extension-card-preview-body {
   padding: 8px 10px 10px;
+}
+
+.extension-buy-link {
+  display: block;
+  margin-top: 10px;
+  padding: 6px 10px;
+  border: 1px solid #6441a5;
+  border-radius: 4px;
+  background: transparent;
+  color: #a970ff;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-align: center;
+  text-decoration: none;
+  letter-spacing: 0.02em;
+  transition: background 120ms;
+}
+
+.extension-buy-link:hover {
+  background: rgba(100, 65, 165, 0.18);
 }
 
 .extension-card-preview-title {
