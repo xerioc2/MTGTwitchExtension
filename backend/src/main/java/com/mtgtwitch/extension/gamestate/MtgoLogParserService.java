@@ -80,13 +80,16 @@ public class MtgoLogParserService {
         if (gameStatusEvent.isPresent()) {
             GameState gameState = gameStateService.apply(gameStatusEvent.get());
             log.info(
-                    "Applied MTGO game status update: gameId={}, players={}, hand={}, battlefield={}, graveyard={}, exile={}",
+                    "Applied MTGO game status update: gameId={}, players={}, hand={}, battlefield={}, graveyard={}, exile={}, opponentBattlefield={}, opponentGraveyard={}, opponentExile={}",
                     gameState.gameId(),
                     gameState.players().size(),
                     gameState.handCards().size(),
                     gameState.battlefieldCards().size(),
                     gameState.graveyardCards().size(),
-                    gameState.exileCards().size()
+                    gameState.exileCards().size(),
+                    gameState.opponentBattlefieldCards().size(),
+                    gameState.opponentGraveyardCards().size(),
+                    gameState.opponentExileCards().size()
             );
             return Optional.empty();
         }

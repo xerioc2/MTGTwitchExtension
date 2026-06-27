@@ -23,6 +23,9 @@ const emptyGameState = {
   battlefieldCards: [],
   graveyardCards: [],
   exileCards: [],
+  opponentBattlefieldCards: [],
+  opponentGraveyardCards: [],
+  opponentExileCards: [],
   deckCatalogIds: [],
   detectionRegions: [],
   gameId: null,
@@ -34,6 +37,12 @@ const zones = [
   { key: 'battlefield', cardsKey: 'battlefieldCards', label: 'BATTLEFIELD' },
   { key: 'graveyard', cardsKey: 'graveyardCards', label: 'GRAVEYARD' },
   { key: 'exile', cardsKey: 'exileCards', label: 'EXILE' }
+];
+
+const opponentZones = [
+  { key: 'opponentBattlefieldCards', label: 'OPP BATTLEFIELD' },
+  { key: 'opponentGraveyardCards', label: 'OPP GRAVEYARD' },
+  { key: 'opponentExileCards', label: 'OPP EXILE' }
 ];
 
 const pipColors = {
@@ -187,6 +196,12 @@ function ExtensionPanel({ isOverlay }) {
       nextZoneCards[zone.key] = groupDuplicates(cards, cardDetailsByCatalogId);
     }
 
+    for (const zone of opponentZones) {
+      const cards = (gameState[zone.key] ?? []).map((card) => normalizeCard(card));
+
+      nextZoneCards[zone.key] = groupDuplicates(cards, cardDetailsByCatalogId);
+    }
+
     return nextZoneCards;
   }, [cardDetailsByCatalogId, gameState]);
 
@@ -208,8 +223,17 @@ function ExtensionPanel({ isOverlay }) {
       }
     }
 
+    for (const zone of opponentZones) {
+      for (const card of gameState[zone.key] ?? []) {
+        if (card.catalogId) {
+          catalogIds.add(card.catalogId);
+        }
+      }
+    }
+
     return Array.from(catalogIds);
   }, [gameState]);
+  const hasOpponentZoneCards = opponentZones.some((zone) => (zoneCards[zone.key] ?? []).length > 0);
   const screenDetectionRegions = useScreenDetections({
     enabled: isOverlay && enableScreenDetections,
     gameState
@@ -522,6 +546,54 @@ function ExtensionPanel({ isOverlay }) {
               </section>
             );
           })}
+
+          {hasOpponentZoneCards && (
+            <>
+              <div className="extension-zone-separator">Opponent</div>
+              {opponentZones.map((zone) => {
+                const cards = zoneCards[zone.key] ?? [];
+                const isCollapsed = collapsedZones[zone.key];
+
+                if (cards.length === 0) {
+                  return null;
+                }
+
+                return (
+                  <section className="extension-zone" key={zone.key}>
+                    <button className="extension-zone-header" type="button" onClick={() => toggleZone(zone.key)}>
+                      {isCollapsed ? <ChevronRight aria-hidden="true" size={15} /> : <ChevronDown aria-hidden="true" size={15} />}
+                      <span>{zone.label}</span>
+                      <span className="extension-count">{countCards(cards)}</span>
+                    </button>
+
+                    {!isCollapsed && (
+                      <div className="extension-card-list">
+                        {cards.map((card) => (
+                          <button
+                            className="extension-card-row"
+                            type="button"
+                            key={`${zone.key}-${card.catalogId}-${card.name}`}
+                            onMouseEnter={(event) => handleCardMouseEnter(card, event)}
+                            onMouseLeave={handlePreviewMouseLeave}
+                            onClick={() => handlePreviewClick(card)}
+                          >
+                            <span className="extension-quantity">{card.quantity}</span>
+                            <span className="extension-card-main">
+                              <span className="extension-card-title">
+                                <span>{card.name}</span>
+                                <ManaCost manaCost={card.manaCost} />
+                              </span>
+                              <span className="extension-card-subtitle">{card.typeLine || `Catalog ID ${card.catalogId}`}</span>
+                            </span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                );
+              })}
+            </>
+          )}
         </div>
       </section>
 

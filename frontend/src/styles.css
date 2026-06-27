@@ -255,6 +255,15 @@ textarea {
   margin-top: 6px;
 }
 
+.extension-zone-separator {
+  padding: 5px 9px 3px;
+  color: #80786d;
+  font-size: 0.64rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
 .extension-zone-header {
   width: 100%;
   min-height: 30px;

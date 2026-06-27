@@ -15,15 +15,17 @@ const args = process.argv.slice(2);
 const frameSource = parseFrameSource(args);
 const loopSeconds = parseLoopSeconds(args);
 const debugPath = parseDebugPath(args);
+const knownCards = parseKnownCards(args);
 const channelId = process.env.RELAY_CHANNEL_ID?.trim() ?? '';
+const bridgeUrl = process.env.BRIDGE_URL?.trim() ?? '';
 const supabaseUrl = process.env.SUPABASE_URL?.trim() ?? '';
 const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY?.trim() ?? '';
 const geminiApiKey = process.env.GEMINI_API_KEY?.trim() ?? '';
 
-assertSafeChannelId(channelId);
+assertSafeChannelId(channelId, supabaseUrl, bridgeUrl);
 
-if (!supabaseUrl || !serviceRoleKey) {
-  console.error('error: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for wire publishing');
+if (!bridgeUrl && (!supabaseUrl || !serviceRoleKey)) {
+  console.error('error: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required for wire publishing when BRIDGE_URL is not set');
   process.exit(1);
 }
 
@@ -48,14 +50,13 @@ if (loopSeconds !== null) {
 }
 
 async function publishOnce(): Promise<void> {
-  const detected = await provider.detect(frame);
-  const names = Array.from(new Set(detected.cards.map((card) => normalizeCardName(card.name))));
+  const detected = await provider.detect(frame, { knownCards });
   const resolved = await resolveCardImages(detected.cards.map((card) => card.name));
   const partitions = splitResolvedVisionCards(detected.cards, resolved);
   const resolvedCount = partitions.resolved.length;
   await writeDebugFile(detected.cards, resolved);
   const regions = mapToDetectionRegions(partitions.resolved, resolved, { channelId });
-  const didPublish = await publishRegions(regions, { supabaseUrl, serviceRoleKey, channelId });
+  const didPublish = await publishRegions(regions, { bridgeUrl, supabaseUrl, serviceRoleKey, channelId });
 
   console.log([
     `detected=${detected.cards.length}`,
@@ -66,7 +67,7 @@ async function publishOnce(): Promise<void> {
   ].join(' '));
 
   if (!didPublish) {
-    console.error('warning: Supabase relay publish failed');
+    console.error(`warning: ${bridgeUrl ? 'bridge detection-region publish' : 'Supabase relay publish'} failed`);
   }
 }
 
@@ -101,7 +102,7 @@ function extForMime(mimeType: string): string {
   }
 }
 
-function assertSafeChannelId(value: string): void {
+function assertSafeChannelId(value: string, configuredSupabaseUrl: string, configuredBridgeUrl: string): void {
   if (!value) {
     console.error('error: RELAY_CHANNEL_ID is required and must be a dedicated dev channel');
     process.exit(1);
@@ -110,6 +111,10 @@ function assertSafeChannelId(value: string): void {
   if (value === 'xerioc2') {
     console.error('error: refusing to publish to production channel RELAY_CHANNEL_ID=xerioc2');
     process.exit(1);
+  }
+
+  if (configuredSupabaseUrl.includes('lgzmxstmqzwjbmurstye') && !configuredBridgeUrl) {
+    console.error('warning: SUPABASE_URL appears to point at the production Supabase project. Set BRIDGE_URL or use a dev Supabase project.');
   }
 }
 
@@ -142,6 +147,20 @@ function parseDebugPath(values: string[]): string | null {
   return nextValue;
 }
 
+function parseKnownCards(values: string[]): string[] | undefined {
+  const knownCardsValue = valueAfterOptionalFlag(values, '--known-cards');
+  if (!knownCardsValue) {
+    return undefined;
+  }
+
+  const cards = knownCardsValue
+    .split(',')
+    .map((card) => card.replace(/\s+/g, ' ').trim())
+    .filter(Boolean);
+
+  return cards.length > 0 ? cards : undefined;
+}
+
 type FrameSource =
   | { kind: 'file'; path: string }
   | { kind: 'twitch'; value: string };
@@ -155,11 +174,12 @@ function parseFrameSource(values: string[]): FrameSource {
     && values[index - 1] !== '--debug'
     && values[index - 1] !== '--channel'
     && values[index - 1] !== '--url'
+    && values[index - 1] !== '--known-cards'
   ));
   const sourceCount = imagePaths.length + (channel ? 1 : 0) + (url ? 1 : 0);
 
   if (sourceCount !== 1) {
-    console.error('usage: npm run wire -- <imagePath> [--loop <seconds>] [--debug [path]] OR npm run wire -- --channel <name> [--debug] OR npm run wire -- --url <twitchUrl> [--debug]');
+    console.error('usage: npm run wire -- <imagePath> [--loop <seconds>] [--debug [path]] [--known-cards "Name,Name"] OR npm run wire -- --channel <name> [--debug] [--known-cards "Name,Name"] OR npm run wire -- --url <twitchUrl> [--debug] [--known-cards "Name,Name"]');
     console.error('error: provide exactly one frame source: image path, --channel, or --url');
     process.exit(1);
   }
@@ -194,6 +214,21 @@ async function loadFrame(source: FrameSource): Promise<{ frame: FrameInput; sour
 }
 
 function valueAfterFlag(values: string[], flag: string): string | null {
+  const flagIndex = values.indexOf(flag);
+  if (flagIndex < 0) {
+    return null;
+  }
+
+  const value = values[flagIndex + 1];
+  if (!value || value.startsWith('--')) {
+    console.error(`error: ${flag} requires a value`);
+    process.exit(1);
+  }
+
+  return value;
+}
+
+function valueAfterOptionalFlag(values: string[], flag: string): string | null {
   const flagIndex = values.indexOf(flag);
   if (flagIndex < 0) {
     return null;

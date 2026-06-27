@@ -18,6 +18,9 @@ public record GameState(
         Long gameId,
         List<Integer> deckCatalogIds,
         List<DetectionRegion> detectionRegions,
+        List<GameCard> opponentBattlefieldCards,
+        List<GameCard> opponentGraveyardCards,
+        List<GameCard> opponentExileCards,
         Instant updatedAt
 ) {
 }
