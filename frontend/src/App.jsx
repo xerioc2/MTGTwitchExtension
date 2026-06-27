@@ -65,12 +65,20 @@ function resolveRuntimeBackendUrls() {
   };
 }
 
+function toManaPoolSlug(name) {
+  return name
+    .toLowerCase()
+    .replace(/['']/g, '')
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+}
+
 function manaPoolUrl(cardName) {
   if (!cardName || cardName.startsWith('Catalog ID') || cardName.startsWith('CatalogID')) {
     return null;
   }
 
-  return `https://manapool.com/?q=${encodeURIComponent(cardName)}&ref=${MANA_POOL_REF}`;
+  return `https://manapool.com/card/${toManaPoolSlug(cardName)}?ref=${MANA_POOL_REF}`;
 }
 
 export default function App() {
@@ -94,6 +102,7 @@ function ExtensionPanel({ isOverlay }) {
   const [lastError, setLastError] = useState('');
   const [rescanStatus, setRescanStatus] = useState('');
   const [isRescanning, setIsRescanning] = useState(false);
+  const [isBroadcaster, setIsBroadcaster] = useState(false);
   const [collapsedZones, setCollapsedZones] = useState({});
   const [hoveredCard, setHoveredCard] = useState(null);
   const [panelCard, setPanelCard] = useState(null);
@@ -153,6 +162,71 @@ function ExtensionPanel({ isOverlay }) {
     }
   }, []);
 
+  const fetchManaPoolPricesBatch = useCallback(async (cardNames) => {
+    const toFetch = cardNames.filter((name) => {
+      if (!manaPoolUrl(name)) {
+        return false;
+      }
+
+      const cacheKey = name.toLowerCase();
+      if (fetchedManaPoolKeys.current.has(cacheKey)) {
+        return false;
+      }
+
+      fetchedManaPoolKeys.current.add(cacheKey);
+      return true;
+    });
+
+    if (toFetch.length === 0) {
+      return;
+    }
+
+    const batchSize = 100;
+    for (let index = 0; index < toFetch.length; index += batchSize) {
+      const batch = toFetch.slice(index, index + batchSize);
+
+      try {
+        const response = await fetch('https://manapool.com/api/v1/card_info', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            card_names: batch
+          })
+        });
+
+        if (!response.ok) {
+          continue;
+        }
+
+        const result = await response.json();
+        const priceMap = {};
+
+        for (const card of result.cards ?? []) {
+          priceMap[card.name.toLowerCase()] = {
+            fromPriceCents: card.from_price_cents ?? null,
+            quantityAvailable: card.quantity_available ?? 0
+          };
+        }
+
+        for (const name of batch) {
+          const cacheKey = name.toLowerCase();
+          if (!(cacheKey in priceMap)) {
+            priceMap[cacheKey] = null;
+          }
+        }
+
+        setManaPoolPriceByName((current) => ({
+          ...current,
+          ...priceMap
+        }));
+      } catch {
+        // Batch price fetch is best-effort; individual hover fallback still works.
+      }
+    }
+  }, []);
+
   const fetchCardDetails = useCallback(async (catalogId, { cacheFailures }) => {
     try {
       const details = await fetchCardDetailsFromBackendOrScryfall(catalogId);
@@ -160,7 +234,6 @@ function ExtensionPanel({ isOverlay }) {
         ...current,
         [catalogId]: details
       }));
-      fetchManaPoolPrice(details.name);
       return details;
     } catch {
       if (cacheFailures) {
@@ -171,7 +244,7 @@ function ExtensionPanel({ isOverlay }) {
       }
       return null;
     }
-  }, [fetchManaPoolPrice]);
+  }, []);
 
   useEffect(() => {
     if (shouldUseSupabaseRelay) {
@@ -287,6 +360,10 @@ function ExtensionPanel({ isOverlay }) {
       }
     }
 
+    for (const catalogId of gameState.deckCatalogIds ?? []) {
+      catalogIds.add(catalogId);
+    }
+
     return Array.from(catalogIds);
   }, [gameState]);
   const hasOpponentZoneCards = opponentZones.some((zone) => (zoneCards[zone.key] ?? []).length > 0);
@@ -296,20 +373,39 @@ function ExtensionPanel({ isOverlay }) {
   });
 
   useEffect(() => {
+    if (window.Twitch?.ext?.onAuthorized) {
+      window.Twitch.ext.onAuthorized((auth) => {
+        setIsBroadcaster(auth.role === 'broadcaster');
+      });
+    } else {
+      // Local dev outside Twitch sandbox: keep broadcaster tools reachable.
+      setIsBroadcaster(true);
+    }
+  }, []);
+
+  useEffect(() => {
     let isCancelled = false;
 
     async function resolveCards() {
       const unresolvedCatalogIds = catalogIdsToResolve.filter((catalogId) => (
         !cardDetailsByCatalogId[catalogId] && !failedCatalogIds[catalogId]
       ));
+      const resolvedNames = [];
 
       for (const catalogId of unresolvedCatalogIds) {
         if (isCancelled) {
           return;
         }
 
-        await fetchCardDetails(catalogId, { cacheFailures: true });
+        const details = await fetchCardDetails(catalogId, { cacheFailures: true });
+        if (details?.name) {
+          resolvedNames.push(details.name);
+        }
         await sleep(60);
+      }
+
+      if (!isCancelled) {
+        fetchManaPoolPricesBatch(resolvedNames);
       }
     }
 
@@ -318,7 +414,7 @@ function ExtensionPanel({ isOverlay }) {
     return () => {
       isCancelled = true;
     };
-  }, [cardDetailsByCatalogId, catalogIdsToResolve, failedCatalogIds, fetchCardDetails]);
+  }, [cardDetailsByCatalogId, catalogIdsToResolve, failedCatalogIds, fetchCardDetails, fetchManaPoolPricesBatch]);
 
   const isConnected = connectionState === 'connected';
   const isPinnedPanelEnabled = enableScreenDetections && pinPanel;
@@ -545,10 +641,12 @@ function ExtensionPanel({ isOverlay }) {
               </label>
             )}
 
-            <button className="extension-icon-button" type="button" onClick={handleReconnect} disabled={isRescanning}>
-              <RefreshCw aria-hidden="true" size={14} />
-              <span>{isRescanning ? '...' : 'Reconnect'}</span>
-            </button>
+            {isBroadcaster && (
+              <button className="extension-icon-button" type="button" onClick={handleReconnect} disabled={isRescanning}>
+                <RefreshCw aria-hidden="true" size={14} />
+                <span>{isRescanning ? '...' : 'Reconnect'}</span>
+              </button>
+            )}
 
             <span className={`extension-status ${connectionState}`}>
               {isConnected ? <Activity aria-hidden="true" size={13} /> : <CircleAlert aria-hidden="true" size={13} />}
@@ -557,7 +655,7 @@ function ExtensionPanel({ isOverlay }) {
           </div>
         </header>
 
-        {(rescanStatus || lastError) && (
+        {(lastError || (isBroadcaster && rescanStatus)) && (
           <div className="extension-message">
             {lastError || rescanStatus}
           </div>
