@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mapToDetectionRegions } from './regions.js';
+import { mapToDetectionRegions, splitResolvedVisionCards } from './regions.js';
 
 test('mapToDetectionRegions produces LLM DetectionRegion shape', () => {
   const now = new Date('2026-06-24T12:00:00.000Z');
@@ -38,4 +38,20 @@ test('mapToDetectionRegions falls back to vision name and null image', () => {
 
   assert.equal(regions[0].cardName, 'Island');
   assert.equal(regions[0].imageUrl, null);
+});
+
+test('splitResolvedVisionCards partitions only image-backed Scryfall matches as resolved', () => {
+  const lightningBolt = { name: 'Lightning Bolt', bbox: { x: 0, y: 0, w: 0.1, h: 0.1 } };
+  const island = { name: 'Island', bbox: { x: 0.2, y: 0.2, w: 0.1, h: 0.1 } };
+  const fake = { name: 'Veering Bautle', bbox: { x: 0.4, y: 0.4, w: 0.1, h: 0.1 } };
+  const partitions = splitResolvedVisionCards(
+    [lightningBolt, island, fake],
+    new Map([
+      ['lightning bolt', { name: 'Lightning Bolt', imageUrl: 'https://img.test/bolt.jpg' }],
+      ['island', { name: 'Island', imageUrl: null }]
+    ])
+  );
+
+  assert.deepEqual(partitions.resolved, [lightningBolt]);
+  assert.deepEqual(partitions.unresolved, [island, fake]);
 });

@@ -1,7 +1,10 @@
 import type { Bbox, DetectOptions, FrameInput, VisionCard, VisionProvider } from './types.js';
 
-const DEFAULT_GEMINI_MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+const DEFAULT_GEMINI_MODELS = 'gemini-2.5-flash,gemini-2.5-flash-lite';
 const GEMINI_ENDPOINT = 'https://generativelanguage.googleapis.com/v1beta/models';
+const MAX_RETRIES_PER_MODEL = 2;
+const DEFAULT_RETRY_DELAY_MS = 500;
+const MAX_RETRY_DELAY_MS = 5000;
 
 type GeminiBoxCandidate = {
   label?: unknown;
@@ -24,10 +27,12 @@ type GeminiGenerateContentResponse = {
 export class GeminiVisionProvider implements VisionProvider {
   readonly apiKey: string;
   readonly model: string;
+  readonly models: string[];
 
   constructor(opts: { apiKey: string; model?: string }) {
     this.apiKey = opts.apiKey;
-    this.model = opts.model || DEFAULT_GEMINI_MODEL;
+    this.models = buildModelList(opts.model);
+    this.model = this.models[0];
   }
 
   async detect(frame: FrameInput, opts: DetectOptions = {}): Promise<{ cards: VisionCard[] }> {
@@ -35,54 +40,64 @@ export class GeminiVisionProvider implements VisionProvider {
       return { cards: [] };
     }
 
-    try {
-      const response = await fetch(`${GEMINI_ENDPOINT}/${encodeURIComponent(this.model)}:generateContent?key=${encodeURIComponent(this.apiKey)}`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify({
-          contents: [{
-            role: 'user',
-            parts: [
-              { text: buildPrompt(opts) },
-              {
-                inlineData: {
-                  mimeType: frame.mimeType,
-                  data: frame.dataBase64
-                }
-              }
-            ]
-          }],
-          generationConfig: {
-            temperature: 0,
-            responseMimeType: 'application/json'
-          }
-        })
-      });
-
-      if (!response.ok) {
+    for (const model of this.models) {
+      for (let attempt = 0; attempt <= MAX_RETRIES_PER_MODEL; attempt += 1) {
         if (process.env.GEMINI_DEBUG === 'true') {
-          const errorBody = await response.text().catch(() => '');
-          console.error(`[gemini] HTTP ${response.status} ${response.statusText}: ${errorBody.slice(0, 1000)}`);
+          console.error(`[gemini] trying model=${model} attempt=${attempt + 1}`);
         }
-        return { cards: [] };
-      }
 
-      const payload = await response.json() as GeminiGenerateContentResponse;
-      const text = extractText(payload);
-      const cards = parseGeminiCards(text);
-      if (process.env.GEMINI_DEBUG === 'true' && cards.length === 0) {
-        console.error(`[gemini] no cards parsed. raw model text (truncated): ${text.slice(0, 1000) || '<empty>'}`);
+        try {
+          const response = await fetchGemini(model, frame, opts, this.apiKey);
+
+          if (!response.ok) {
+            const errorBody = await response.text().catch(() => '');
+            if (process.env.GEMINI_DEBUG === 'true') {
+              console.error(`[gemini] model=${model} HTTP ${response.status} ${response.statusText}: ${errorBody.slice(0, 1000)}`);
+            }
+
+            if (isRetryableStatus(response.status) && attempt < MAX_RETRIES_PER_MODEL) {
+              await sleep(parseRetryDelayMs(response, errorBody));
+              continue;
+            }
+
+            break;
+          }
+
+          const payload = await response.json() as GeminiGenerateContentResponse;
+          const text = extractText(payload);
+          const cards = parseGeminiCards(text);
+          if (process.env.GEMINI_DEBUG === 'true' && cards.length === 0) {
+            console.error(`[gemini] model=${model} no cards parsed. raw model text (truncated): ${text.slice(0, 1000) || '<empty>'}`);
+          }
+          return { cards };
+        } catch (error) {
+          if (process.env.GEMINI_DEBUG === 'true') {
+            console.error(`[gemini] model=${model} request failed: ${error instanceof Error ? error.message : String(error)}`);
+          }
+          break;
+        }
       }
-      return { cards };
-    } catch (error) {
-      if (process.env.GEMINI_DEBUG === 'true') {
-        console.error(`[gemini] request failed: ${error instanceof Error ? error.message : String(error)}`);
-      }
-      return { cards: [] };
     }
+
+    return { cards: [] };
   }
+}
+
+export function isRetryableStatus(code: number): boolean {
+  return code === 429 || code === 503;
+}
+
+export function parseModelList(envValue: string | undefined, fallbackDefault: string, legacyModel?: string): string[] {
+  const models = (envValue || fallbackDefault)
+    .split(',')
+    .map((model) => model.trim())
+    .filter(Boolean);
+  const legacyModels = legacyModel?.trim() ? [legacyModel.trim()] : [];
+  const combinedModels = [...legacyModels, ...models];
+
+  return combinedModels.length > 0
+    ? Array.from(new Set(combinedModels))
+    : parseModelList(fallbackDefault, DEFAULT_GEMINI_MODELS);
 }
 
 export function geminiBoxToBbox(box: readonly number[]): Bbox | null {
@@ -134,7 +149,7 @@ export function parseGeminiCards(text: string): VisionCard[] {
   return cards;
 }
 
-function buildPrompt(opts: DetectOptions): string {
+export function buildPrompt(opts: DetectOptions): string {
   const knownCards = normalizeKnownCards(opts.knownCards);
   const knownCardInstruction = knownCards.length > 0
     ? `Only report cards whose exact English name is in this list: ${knownCards.map((name) => JSON.stringify(name)).join(', ')}. Do not report any card outside this list.`
@@ -147,9 +162,69 @@ function buildPrompt(opts: DetectOptions): string {
     '"box_2d" must be [ymin, xmin, ymax, xmax] normalized from 0 to 1000.',
     'Use the full image frame as the coordinate space, top-left origin.',
     knownCardInstruction,
+    'Only report actual physical card objects in the game: cards in play on the game board, cards in a player\'s hand, or cards on the stack.',
+    'Ignore deck lists, decklist panels, card galleries, card browsers, collection lists, sideboard lists, menus, buttons, UI chrome, and any UI text.',
+    'Ignore usernames, channel names, stream overlays, chat, and text references to cards.',
     'Exclude face-down cards, morph/disguise cards, libraries/decks, hidden zones, and any card whose name cannot actually be read.',
     'Do not guess. If no readable cards are visible, return [].'
   ].join('\n');
+}
+
+function buildModelList(explicitModel: string | undefined): string[] {
+  if (explicitModel?.trim()) {
+    return [explicitModel.trim()];
+  }
+
+  return parseModelList(process.env.GEMINI_MODELS, DEFAULT_GEMINI_MODELS, process.env.GEMINI_MODEL);
+}
+
+function fetchGemini(model: string, frame: FrameInput, opts: DetectOptions, apiKey: string): Promise<Response> {
+  return fetch(`${GEMINI_ENDPOINT}/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      contents: [{
+        role: 'user',
+        parts: [
+          { text: buildPrompt(opts) },
+          {
+            inlineData: {
+              mimeType: frame.mimeType,
+              data: frame.dataBase64
+            }
+          }
+        ]
+      }],
+      generationConfig: {
+        temperature: 0,
+        responseMimeType: 'application/json'
+      }
+    })
+  });
+}
+
+function parseRetryDelayMs(response: Response, body: string): number {
+  const retryAfter = response.headers.get('retry-after');
+  const retryAfterSeconds = retryAfter ? Number(retryAfter) : NaN;
+
+  if (Number.isFinite(retryAfterSeconds) && retryAfterSeconds >= 0) {
+    return Math.min(MAX_RETRY_DELAY_MS, retryAfterSeconds * 1000);
+  }
+
+  const retryDelayMatch = body.match(/"retryDelay"\s*:\s*"(\d+(?:\.\d+)?)s"/);
+  if (retryDelayMatch) {
+    return Math.min(MAX_RETRY_DELAY_MS, Number(retryDelayMatch[1]) * 1000);
+  }
+
+  return DEFAULT_RETRY_DELAY_MS;
+}
+
+function sleep(milliseconds: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, milliseconds);
+  });
 }
 
 function extractText(payload: GeminiGenerateContentResponse): string {

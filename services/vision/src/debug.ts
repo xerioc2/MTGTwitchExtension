@@ -3,6 +3,7 @@ import type { Bbox, FrameInput } from './types.js';
 export type DebugCard = {
   name: string;
   bbox: Bbox;
+  resolved?: boolean;
 };
 
 export function renderDebugHtml(frame: FrameInput, cards: DebugCard[]): string {
@@ -39,6 +40,10 @@ export function renderDebugHtml(frame: FrameInput, cards: DebugCard[]): string {
       box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.72);
       pointer-events: none;
     }
+    .box.unresolved {
+      border-color: #ff5d5d;
+      border-style: dashed;
+    }
     .label {
       position: absolute;
       left: 0;
@@ -54,9 +59,35 @@ export function renderDebugHtml(frame: FrameInput, cards: DebugCard[]): string {
       text-overflow: ellipsis;
       white-space: nowrap;
     }
+    .legend {
+      width: min(100%, 1280px);
+      margin: 0 auto 10px;
+      display: flex;
+      gap: 12px;
+      font-size: 13px;
+    }
+    .legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 5px;
+    }
+    .legend i {
+      width: 16px;
+      height: 10px;
+      border: 2px solid #ffdf5d;
+      display: inline-block;
+    }
+    .legend .unresolved-key i {
+      border-color: #ff5d5d;
+      border-style: dashed;
+    }
   </style>
 </head>
 <body>
+  <div class="legend">
+    <span class="resolved-key"><i></i>Resolved Scryfall card</span>
+    <span class="unresolved-key"><i></i>Unresolved / not published</span>
+  </div>
   <div class="frame">
     <img src="data:${escapeAttribute(frame.mimeType)};base64,${escapeAttribute(frame.dataBase64)}" alt="Analyzed frame">
 ${boxes}
@@ -72,8 +103,9 @@ function renderBox(card: DebugCard, index: number): string {
   const top = percent(bbox.y);
   const width = percent(bbox.w);
   const height = percent(bbox.h);
+  const className = card.resolved === false ? 'box unresolved' : 'box resolved';
 
-  return `    <div class="box" data-index="${index}" style="left:${left};top:${top};width:${width};height:${height};">
+  return `    <div class="${className}" data-index="${index}" style="left:${left};top:${top};width:${width};height:${height};">
       <div class="label">${escapeHtml(card.name)}</div>
     </div>`;
 }

@@ -25,6 +25,11 @@ export type MapToDetectionRegionsOptions = {
   now?: Date;
 };
 
+export type SplitResolvedVisionCardsResult = {
+  resolved: VisionCard[];
+  unresolved: VisionCard[];
+};
+
 export function mapToDetectionRegions(
   visionCards: VisionCard[],
   resolved: Map<string, ResolvedCardImage>,
@@ -55,4 +60,25 @@ export function mapToDetectionRegions(
       expiresAt
     };
   });
+}
+
+export function splitResolvedVisionCards(
+  visionCards: VisionCard[],
+  resolved: Map<string, ResolvedCardImage>
+): SplitResolvedVisionCardsResult {
+  const partitions: SplitResolvedVisionCardsResult = {
+    resolved: [],
+    unresolved: []
+  };
+
+  for (const card of visionCards) {
+    const resolvedCard = resolved.get(normalizeCardName(card.name));
+    if (resolvedCard?.imageUrl) {
+      partitions.resolved.push(card);
+    } else {
+      partitions.unresolved.push(card);
+    }
+  }
+
+  return partitions;
 }

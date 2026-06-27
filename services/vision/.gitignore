@@ -3,3 +3,6 @@ node_modules/
 .env
 .env.local
 wire-debug.html
+wire-debug-frame.*
+wire-debug-frame.*
+debug-frames/

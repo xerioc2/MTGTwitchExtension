@@ -8,6 +8,7 @@ export type {
 
 export {
   GeminiVisionProvider,
+  buildPrompt,
   geminiBoxToBbox,
   parseGeminiCards
 } from './gemini.js';
@@ -19,7 +20,8 @@ export {
 } from './scryfall.js';
 
 export {
-  mapToDetectionRegions
+  mapToDetectionRegions,
+  splitResolvedVisionCards
 } from './regions.js';
 
 export type {

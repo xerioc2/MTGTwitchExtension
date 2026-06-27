@@ -3,7 +3,7 @@ import { extname, resolve } from 'node:path';
 import { GeminiVisionProvider } from '../gemini.js';
 import { loadLocalEnv } from '../env.js';
 import { publishRegions } from '../relay.js';
-import { mapToDetectionRegions } from '../regions.js';
+import { mapToDetectionRegions, splitResolvedVisionCards } from '../regions.js';
 import { normalizeCardName, resolveCardImages } from '../scryfall.js';
 import { renderDebugHtml } from '../debug.js';
 import { extractTwitchFrame } from '../twitch.js';
@@ -51,14 +51,16 @@ async function publishOnce(): Promise<void> {
   const detected = await provider.detect(frame);
   const names = Array.from(new Set(detected.cards.map((card) => normalizeCardName(card.name))));
   const resolved = await resolveCardImages(detected.cards.map((card) => card.name));
-  const resolvedCount = names.filter((name) => resolved.get(name)?.imageUrl).length;
+  const partitions = splitResolvedVisionCards(detected.cards, resolved);
+  const resolvedCount = partitions.resolved.length;
   await writeDebugFile(detected.cards, resolved);
-  const regions = mapToDetectionRegions(detected.cards, resolved, { channelId });
+  const regions = mapToDetectionRegions(partitions.resolved, resolved, { channelId });
   const didPublish = await publishRegions(regions, { supabaseUrl, serviceRoleKey, channelId });
 
   console.log([
     `detected=${detected.cards.length}`,
-    `resolvedImages=${resolvedCount}`,
+    `resolved=${resolvedCount}`,
+    `unresolved=${partitions.unresolved.length}`,
     `publishedRegions=${didPublish ? regions.length : 0}`,
     `channel=${channelId}`
   ].join(' '));
@@ -75,12 +77,28 @@ async function writeDebugFile(cards: Awaited<ReturnType<GeminiVisionProvider['de
 
   const debugCards = cards.map((card) => ({
     name: resolved.get(normalizeCardName(card.name))?.name ?? card.name,
-    bbox: card.bbox
+    bbox: card.bbox,
+    resolved: Boolean(resolved.get(normalizeCardName(card.name))?.imageUrl)
   }));
   const outputPath = resolve(debugPath);
 
   await writeFile(outputPath, renderDebugHtml(frame, debugCards), 'utf8');
   console.log(`debugHtml=${outputPath}`);
+
+  const framePath = resolve(debugPath.replace(/\.html?$/i, '') + `-frame.${extForMime(frame.mimeType)}`);
+  await writeFile(framePath, Buffer.from(frame.dataBase64, 'base64'));
+  console.log(`debugFrame=${framePath}`);
+}
+
+function extForMime(mimeType: string): string {
+  switch (mimeType) {
+    case 'image/png':
+      return 'png';
+    case 'image/webp':
+      return 'webp';
+    default:
+      return 'jpg';
+  }
 }
 
 function assertSafeChannelId(value: string): void {

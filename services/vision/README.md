@@ -16,9 +16,12 @@ For real Gemini scans, create a local env file or set process env vars:
 ```powershell
 $env:GEMINI_API_KEY="your_key"
 $env:GEMINI_MODEL="gemini-2.5-flash"
+$env:GEMINI_MODELS="gemini-2.5-flash,gemini-2.5-flash-lite"
 ```
 
 Do not commit API keys. `.env.example` documents expected variables only.
+
+`GEMINI_MODELS` is a comma-separated fallback list. By default the provider tries `gemini-2.5-flash` first and falls back to `gemini-2.5-flash-lite` if Gemini returns transient throttling or overload responses like 429 or 503. `GEMINI_MODEL` remains supported as a legacy single preferred model and is prepended to the list.
 
 For the relay wire CLI, set these in `services/vision/.env` or as process env vars:
 
