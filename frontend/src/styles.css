@@ -468,7 +468,10 @@ textarea {
 }
 
 .extension-buy-link {
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
   margin-top: 10px;
   padding: 6px 10px;
   border: 1px solid #6441a5;
@@ -477,7 +480,6 @@ textarea {
   color: #a970ff;
   font-size: 0.72rem;
   font-weight: 600;
-  text-align: center;
   text-decoration: none;
   letter-spacing: 0.02em;
   transition: background 120ms;
@@ -485,6 +487,13 @@ textarea {
 
 .extension-buy-link:hover {
   background: rgba(100, 65, 165, 0.18);
+}
+
+.extension-buy-price {
+  flex: 0 0 auto;
+  color: #d8c9f2;
+  font-size: 0.68rem;
+  font-weight: 700;
 }
 
 .extension-card-preview-title {

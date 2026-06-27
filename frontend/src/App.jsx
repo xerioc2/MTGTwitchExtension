@@ -1,6 +1,6 @@
 import { Activity, ChevronDown, ChevronRight, CircleAlert, RefreshCw } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
-import { Component, useCallback, useEffect, useMemo, useState } from 'react';
+import { Component, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import DebugPage from './DebugPage.jsx';
 import { useScreenDetections } from './screenDetections/useScreenDetections.js';
 
@@ -66,7 +66,7 @@ function resolveRuntimeBackendUrls() {
 }
 
 function manaPoolUrl(cardName) {
-  if (!cardName || cardName.startsWith('Catalog ID')) {
+  if (!cardName || cardName.startsWith('Catalog ID') || cardName.startsWith('CatalogID')) {
     return null;
   }
 
@@ -107,6 +107,51 @@ function ExtensionPanel({ isOverlay }) {
   });
   const [cardDetailsByCatalogId, setCardDetailsByCatalogId] = useState({});
   const [failedCatalogIds, setFailedCatalogIds] = useState({});
+  const [manaPoolPriceByName, setManaPoolPriceByName] = useState({});
+  const fetchedManaPoolKeys = useRef(new Set());
+
+  const fetchManaPoolPrice = useCallback(async (cardName) => {
+    if (!manaPoolUrl(cardName)) {
+      return;
+    }
+
+    const cacheKey = cardName.toLowerCase();
+    if (fetchedManaPoolKeys.current.has(cacheKey)) {
+      return;
+    }
+    fetchedManaPoolKeys.current.add(cacheKey);
+
+    try {
+      const response = await fetch('https://manapool.com/api/v1/card_info', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          card_names: [cardName]
+        })
+      });
+
+      if (!response.ok) {
+        return;
+      }
+
+      const result = await response.json();
+      const card = result.cards?.[0];
+
+      setManaPoolPriceByName((current) => ({
+        ...current,
+        [cacheKey]: card
+          ? {
+              fromPriceCents: card.from_price_cents ?? null,
+              quantityAvailable: card.quantity_available ?? 0
+            }
+          : null
+      }));
+    } catch {
+      // ManaPool prices are best-effort; keep card previews usable if the request fails.
+    }
+  }, []);
 
   const fetchCardDetails = useCallback(async (catalogId, { cacheFailures }) => {
     try {
@@ -115,6 +160,7 @@ function ExtensionPanel({ isOverlay }) {
         ...current,
         [catalogId]: details
       }));
+      fetchManaPoolPrice(details.name);
       return details;
     } catch {
       if (cacheFailures) {
@@ -125,7 +171,7 @@ function ExtensionPanel({ isOverlay }) {
       }
       return null;
     }
-  }, []);
+  }, [fetchManaPoolPrice]);
 
   useEffect(() => {
     if (shouldUseSupabaseRelay) {
@@ -420,6 +466,9 @@ function ExtensionPanel({ isOverlay }) {
       return;
     }
 
+    const resolvedName = cardDetailsByCatalogId[card.catalogId]?.name ?? card.name;
+    fetchManaPoolPrice(resolvedName);
+
     if (!card.catalogId || cardDetailsByCatalogId[card.catalogId]) {
       return;
     }
@@ -442,6 +491,7 @@ function ExtensionPanel({ isOverlay }) {
     const hasCatalogId = Number.isInteger(catalogId) && catalogId > 0;
 
     const card = buildDetectionRegionCard(region, catalogId, hasCatalogId);
+    fetchManaPoolPrice(region.cardName);
     const regionLeft = region.bbox.x * window.innerWidth;
     const regionTop = region.bbox.y * window.innerHeight;
     const previewLeft = Math.min(
@@ -637,6 +687,7 @@ function ExtensionPanel({ isOverlay }) {
         <CardPreview
           card={activePreviewCard}
           cachedDetails={activePreviewCard.catalogId ? cardDetailsByCatalogId[activePreviewCard.catalogId] : undefined}
+          manaPoolPrice={getManaPoolPrice(activePreviewCard, cardDetailsByCatalogId, manaPoolPriceByName)}
           docked={isPinnedPanelEnabled}
           locked={Boolean(lockedPanelCardKey)}
           onUnlock={handleUnlockPanel}
@@ -710,9 +761,20 @@ function ManaCost({ manaCost }) {
   );
 }
 
-function CardPreview({ card, cachedDetails, docked = false, locked = false, onUnlock, onClose }) {
+function CardPreview({ card, cachedDetails, manaPoolPrice, docked = false, locked = false, onUnlock, onClose }) {
   const details = { ...card, ...cachedDetails };
   const imageUri = details.imageUrl || details.normalImageUri || details.imageUri;
+  const buyUrl = manaPoolUrl(details.name);
+  let priceLabel = null;
+
+  if (buyUrl) {
+    if (manaPoolPrice === null || manaPoolPrice?.quantityAvailable === 0 || manaPoolPrice?.fromPriceCents === null) {
+      priceLabel = 'Out of stock';
+    } else if (manaPoolPrice?.fromPriceCents !== undefined) {
+      priceLabel = `From $${(manaPoolPrice.fromPriceCents / 100).toFixed(2)}`;
+    }
+  }
+
   const className = docked
     ? 'extension-card-preview extension-card-preview--docked'
     : 'extension-card-preview';
@@ -740,19 +802,17 @@ function CardPreview({ card, cachedDetails, docked = false, locked = false, onUn
         </div>
         <p>{details.typeLine || `Catalog ID ${details.catalogId}`}</p>
         <p>{details.oracleText || (details.loading ? 'Loading Scryfall card data...' : 'Card details unavailable')}</p>
-        {(() => {
-          const url = manaPoolUrl(details.name);
-          return url ? (
-            <a
-              className="extension-buy-link"
-              href={url}
-              target="_blank"
-              rel="noreferrer"
-            >
-              Buy on ManaPool
-            </a>
-          ) : null;
-        })()}
+        {buyUrl && (
+          <a
+            className="extension-buy-link"
+            href={buyUrl}
+            target="_blank"
+            rel="noreferrer"
+          >
+            <span>Buy on ManaPool</span>
+            {priceLabel && <span className="extension-buy-price">{priceLabel}</span>}
+          </a>
+        )}
       </div>
     </aside>
   );
@@ -815,6 +875,14 @@ function groupDuplicates(cards, cardDetailsByCatalogId) {
 
 function countCards(cards) {
   return cards.reduce((total, card) => total + card.quantity, 0);
+}
+
+function getManaPoolPrice(card, cardDetailsByCatalogId, manaPoolPriceByName) {
+  const cardName = card.catalogId
+    ? cardDetailsByCatalogId[card.catalogId]?.name ?? card.name
+    : card.name;
+
+  return cardName ? manaPoolPriceByName[cardName.toLowerCase()] : undefined;
 }
 
 function buildPlaceholderCard(card) {
