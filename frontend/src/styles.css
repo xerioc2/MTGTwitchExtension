@@ -72,31 +72,6 @@ textarea {
   pointer-events: none;
 }
 
-.extension-overlay-shell::before {
-  content: "MTGO";
-  position: fixed;
-  top: 42%;
-  right: 0;
-  z-index: 1;
-  width: 34px;
-  height: 92px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border: 1px solid rgba(88, 80, 65, 0.9);
-  border-right: 0;
-  border-radius: 6px 0 0 6px;
-  background: rgba(24, 23, 19, 0.92);
-  color: #f7f4ee;
-  font-size: 0.68rem;
-  font-weight: 800;
-  letter-spacing: 0.08em;
-  writing-mode: vertical-rl;
-  text-orientation: mixed;
-  box-shadow: -8px 0 24px rgba(0, 0, 0, 0.34);
-  pointer-events: auto;
-}
-
 .extension-panel {
   width: min(100%, 320px);
   min-height: 100vh;
@@ -126,6 +101,10 @@ textarea {
 
 .extension-overlay-shell:hover .extension-panel,
 .extension-overlay-shell .extension-panel:focus-within {
+  transform: translateX(0);
+}
+
+.extension-overlay-shell--open .extension-panel {
   transform: translateX(0);
 }
 
@@ -244,6 +223,35 @@ textarea {
   flex: 1;
   overflow-y: auto;
   padding: 7px;
+}
+
+.extension-decklist {
+  flex: 1;
+  overflow-y: auto;
+  padding: 7px;
+}
+
+.extension-decklist-section-label {
+  padding: 8px 7px 4px;
+  color: #f0e6d8;
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  border-bottom: 1px solid #34302a;
+  margin-bottom: 3px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.extension-decklist-type-label {
+  padding: 5px 8px 2px;
+  color: #80786d;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
 }
 
 .extension-zone {

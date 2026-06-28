@@ -5,7 +5,7 @@ import java.util.List;
 public record DeckCatalogEvent(
         long gameId,
         String username,
-        List<Integer> deckCatalogIds,
+        List<DeckCard> deckCards,
         String rawLine
 ) {
 }

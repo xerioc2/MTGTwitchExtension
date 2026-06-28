@@ -29,6 +29,9 @@ class GameStateCompatibilityTests {
         assertThat(json.has("players")).isTrue();
         assertThat(json.has("gameId")).isTrue();
         assertThat(json.has("deckCatalogIds")).isTrue();
+        assertThat(json.has("deckCards")).isTrue();
+        assertThat(json.get("deckCards").isArray()).isTrue();
+        assertThat(json.get("deckCards")).isEmpty();
         assertThat(json.has("updatedAt")).isTrue();
         assertThat(json.has("detectionRegions")).isTrue();
         assertThat(json.get("detectionRegions").isArray()).isTrue();

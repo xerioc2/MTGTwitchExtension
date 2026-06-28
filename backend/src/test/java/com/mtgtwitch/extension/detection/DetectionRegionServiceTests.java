@@ -129,6 +129,7 @@ class DetectionRegionServiceTests {
                 List.of(),
                 List.of(),
                 List.of(),
+                List.of(),
                 now
         );
 

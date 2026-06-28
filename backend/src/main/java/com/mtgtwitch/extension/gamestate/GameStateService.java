@@ -25,6 +25,7 @@ public class GameStateService {
     private final GameStateBroadcaster gameStateBroadcaster;
     private Long gameId;
     private List<Integer> deckCatalogIds = List.of();
+    private List<DeckCard> deckCards = List.of();
     private List<DetectionRegion> detectionRegions = List.of();
     private List<PlayerState> players = List.of();
     private String localPlayerName;
@@ -59,7 +60,7 @@ public class GameStateService {
     }
 
     public synchronized GameState apply(GameStatusEvent event) {
-        resetForNewGame(event.gameId());
+        resetForNewGame(event.gameId(), event.eventId());
         gameId = event.gameId();
         players = List.copyOf(event.players());
         clearTrackedZones();
@@ -83,7 +84,11 @@ public class GameStateService {
         resetForNewGame(event.gameId());
         gameId = event.gameId();
         localPlayerName = event.username();
-        deckCatalogIds = List.copyOf(event.deckCatalogIds());
+        deckCards = List.copyOf(event.deckCards());
+        deckCatalogIds = deckCards.stream()
+                .map(DeckCard::catalogId)
+                .distinct()
+                .toList();
 
         GameState gameState = snapshot();
         gameStateBroadcaster.broadcast(gameState);
@@ -115,6 +120,7 @@ public class GameStateService {
                 List.copyOf(players),
                 gameId,
                 List.copyOf(deckCatalogIds),
+                List.copyOf(deckCards),
                 List.copyOf(detectionRegions),
                 List.copyOf(opponentZoneCards.get(Zone.BATTLEFIELD)),
                 List.copyOf(opponentZoneCards.get(Zone.GRAVEYARD)),
@@ -146,12 +152,22 @@ public class GameStateService {
     }
 
     private void resetForNewGame(long nextGameId) {
+        resetForNewGame(nextGameId, null);
+    }
+
+    private void resetForNewGame(long nextGameId, Long eventId) {
         if (gameId != null && gameId != nextGameId) {
+            boolean preserveEventDeck = eventId != null && gameId == eventId;
             clearTrackedZones();
-            deckCatalogIds = List.of();
+            if (!preserveEventDeck) {
+                deckCatalogIds = List.of();
+                deckCards = List.of();
+            }
             detectionRegions = List.of();
             players = List.of();
-            localPlayerName = null;
+            if (!preserveEventDeck) {
+                localPlayerName = null;
+            }
         }
     }
 

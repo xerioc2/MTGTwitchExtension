@@ -17,6 +17,7 @@ public record GameState(
         List<PlayerState> players,
         Long gameId,
         List<Integer> deckCatalogIds,
+        List<DeckCard> deckCards,
         List<DetectionRegion> detectionRegions,
         List<GameCard> opponentBattlefieldCards,
         List<GameCard> opponentGraveyardCards,

@@ -129,6 +129,7 @@ class ScreenCardDetectorTests {
                 List.of(),
                 List.of(),
                 List.of(),
+                List.of(),
                 OBSERVED_AT
         );
     }

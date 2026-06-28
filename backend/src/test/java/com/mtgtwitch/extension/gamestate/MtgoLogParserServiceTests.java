@@ -98,7 +98,9 @@ class MtgoLogParserServiceTests {
         assertThat(event).hasValueSatisfying(deckEvent -> {
             assertThat(deckEvent.gameId()).isEqualTo(950571148);
             assertThat(deckEvent.username()).isEqualTo("DB_xerioc");
-            assertThat(deckEvent.deckCatalogIds()).containsExactly(126449, 106607, 126443);
+            assertThat(deckEvent.deckCards())
+                    .extracting(DeckCard::catalogId)
+                    .containsExactly(126449, 106607, 126443);
         });
     }
 

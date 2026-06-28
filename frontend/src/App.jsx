@@ -1,4 +1,4 @@
-import { Activity, ChevronDown, ChevronRight, CircleAlert, RefreshCw } from 'lucide-react';
+import { Activity, BookOpen, ChevronDown, ChevronRight, CircleAlert, PanelRightClose, PanelRightOpen, RefreshCw } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 import { Component, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import DebugPage from './DebugPage.jsx';
@@ -29,10 +29,48 @@ const emptyGameState = {
   opponentGraveyardCards: [],
   opponentExileCards: [],
   deckCatalogIds: [],
+  deckCards: [],
   detectionRegions: [],
   gameId: null,
   updatedAt: null
 };
+
+const mockDeckGameState = import.meta.env.DEV ? {
+  ...emptyGameState,
+  gameId: 999999,
+  deckCards: [
+    { catalogId: 34460, quantity: 4, inSideboard: false },
+    { catalogId: 91658, quantity: 4, inSideboard: false },
+    { catalogId: 90457, quantity: 4, inSideboard: false },
+    { catalogId: 83103, quantity: 4, inSideboard: false },
+    { catalogId: 78520, quantity: 4, inSideboard: false },
+    { catalogId: 54194, quantity: 4, inSideboard: false },
+    { catalogId: 79608, quantity: 3, inSideboard: false },
+    { catalogId: 62689, quantity: 3, inSideboard: false },
+    { catalogId: 37388, quantity: 3, inSideboard: false },
+    { catalogId: 149595, quantity: 2, inSideboard: false },
+    { catalogId: 122032, quantity: 2, inSideboard: false },
+    { catalogId: 104606, quantity: 1, inSideboard: false },
+    { catalogId: 126509, quantity: 1, inSideboard: false },
+    { catalogId: 97492, quantity: 1, inSideboard: false },
+    { catalogId: 104610, quantity: 1, inSideboard: false },
+    { catalogId: 22044, quantity: 1, inSideboard: false },
+    { catalogId: 28707, quantity: 1, inSideboard: false },
+    { catalogId: 41423, quantity: 1, inSideboard: false },
+    { catalogId: 40024, quantity: 4, inSideboard: false },
+    { catalogId: 104604, quantity: 1, inSideboard: false },
+    { catalogId: 104586, quantity: 1, inSideboard: false },
+    { catalogId: 23586, quantity: 2, inSideboard: false },
+    { catalogId: 34812, quantity: 4, inSideboard: false },
+    { catalogId: 54196, quantity: 4, inSideboard: false },
+    { catalogId: 48404, quantity: 2, inSideboard: true },
+    { catalogId: 93186, quantity: 1, inSideboard: true },
+    { catalogId: 48406, quantity: 2, inSideboard: true },
+    { catalogId: 62687, quantity: 3, inSideboard: true },
+    { catalogId: 126449, quantity: 4, inSideboard: true },
+    { catalogId: 97494, quantity: 3, inSideboard: true }
+  ]
+} : null;
 
 const zones = [
   { key: 'hand', cardsKey: 'handCards', label: 'HAND' },
@@ -97,12 +135,26 @@ export default function App() {
 }
 
 function ExtensionPanel({ isOverlay }) {
-  const [connectionState, setConnectionState] = useState('connecting');
-  const [gameState, setGameState] = useState(emptyGameState);
+  const [connectionState, setConnectionState] = useState(() =>
+    mockDeckGameState && new URLSearchParams(window.location.search).get('demo') === 'deck'
+      ? 'connected'
+      : 'connecting'
+  );
+  const [gameState, setGameState] = useState(() => {
+    if (mockDeckGameState && new URLSearchParams(window.location.search).get('demo') === 'deck') {
+      return mockDeckGameState;
+    }
+
+    return emptyGameState;
+  });
   const [lastError, setLastError] = useState('');
   const [rescanStatus, setRescanStatus] = useState('');
   const [isRescanning, setIsRescanning] = useState(false);
   const [isBroadcaster, setIsBroadcaster] = useState(false);
+  const [showDecklist, setShowDecklist] = useState(false);
+  const [panelOpen, setPanelOpen] = useState(
+    () => window.localStorage.getItem('mtgtwitch.panelOpen') === 'true'
+  );
   const [collapsedZones, setCollapsedZones] = useState({});
   const [hoveredCard, setHoveredCard] = useState(null);
   const [panelCard, setPanelCard] = useState(null);
@@ -360,12 +412,75 @@ function ExtensionPanel({ isOverlay }) {
       }
     }
 
-    for (const catalogId of gameState.deckCatalogIds ?? []) {
-      catalogIds.add(catalogId);
+    for (const card of gameState.deckCards ?? []) {
+      if (card.catalogId) {
+        catalogIds.add(card.catalogId);
+      }
     }
 
     return Array.from(catalogIds);
   }, [gameState]);
+
+  const decklistData = useMemo(() => {
+    if (!gameState.deckCards?.length) {
+      return null;
+    }
+
+    const typeOrder = ['Creature', 'Planeswalker', 'Instant', 'Sorcery', 'Artifact', 'Enchantment', 'Land', 'Other'];
+
+    function getType(typeLine) {
+      if (!typeLine) {
+        return 'Other';
+      }
+
+      for (const type of typeOrder.slice(0, -1)) {
+        if (typeLine.includes(type)) {
+          return type;
+        }
+      }
+
+      return 'Other';
+    }
+
+    function groupByType(cards) {
+      const groups = {};
+
+      for (const card of cards) {
+        (groups[card.type] ??= []).push(card);
+      }
+
+      return typeOrder
+        .filter((type) => groups[type])
+        .map((type) => ({
+          type,
+          cards: groups[type].sort((a, b) => a.name.localeCompare(b.name))
+        }));
+    }
+
+    const main = [];
+    const side = [];
+
+    for (const deckCard of gameState.deckCards) {
+      const details = cardDetailsByCatalogId[deckCard.catalogId];
+      const entry = {
+        ...deckCard,
+        name: details?.name || `Catalog ID ${deckCard.catalogId}`,
+        typeLine: details?.typeLine || '',
+        manaCost: details?.manaCost || '',
+        imageUri: details?.imageUrl || details?.normalImageUri || '',
+        type: getType(details?.typeLine || '')
+      };
+
+      (deckCard.inSideboard ? side : main).push(entry);
+    }
+
+    return {
+      main: groupByType(main),
+      mainCount: main.reduce((sum, card) => sum + card.quantity, 0),
+      side: groupByType(side),
+      sideCount: side.reduce((sum, card) => sum + card.quantity, 0)
+    };
+  }, [gameState.deckCards, cardDetailsByCatalogId]);
   const hasOpponentZoneCards = opponentZones.some((zone) => (zoneCards[zone.key] ?? []).length > 0);
   const screenDetectionRegions = useScreenDetections({
     enabled: isOverlay && enableScreenDetections,
@@ -419,6 +534,14 @@ function ExtensionPanel({ isOverlay }) {
   const isConnected = connectionState === 'connected';
   const isPinnedPanelEnabled = enableScreenDetections && pinPanel;
   const activePreviewCard = isPinnedPanelEnabled ? panelCard : hoveredCard;
+
+  useEffect(() => {
+    if (!isOverlay) {
+      return;
+    }
+
+    window.localStorage.setItem('mtgtwitch.panelOpen', String(panelOpen));
+  }, [isOverlay, panelOpen]);
 
   useEffect(() => {
     if (!enableScreenDetections) {
@@ -621,7 +744,12 @@ function ExtensionPanel({ isOverlay }) {
   }
 
   return (
-    <main className={isOverlay ? 'extension-shell extension-overlay-shell' : 'extension-shell'}>
+    <main className={[
+      'extension-shell',
+      isOverlay && 'extension-overlay-shell',
+      isOverlay && panelOpen && 'extension-overlay-shell--open'
+    ].filter(Boolean).join(' ')}
+    >
       <section className="extension-panel" aria-labelledby="extension-title">
         <header className="extension-header">
           <div>
@@ -639,6 +767,26 @@ function ExtensionPanel({ isOverlay }) {
                 />
                 <span>Pin card</span>
               </label>
+            )}
+
+            {gameState.deckCards?.length > 0 && (
+              <button className="extension-icon-button" type="button" onClick={() => setShowDecklist((current) => !current)}>
+                <BookOpen aria-hidden="true" size={14} />
+                <span>{showDecklist ? 'Zones' : 'Decklist'}</span>
+              </button>
+            )}
+
+            {isOverlay && (
+              <button
+                className="extension-icon-button"
+                type="button"
+                onClick={() => setPanelOpen((open) => !open)}
+                aria-label={panelOpen ? 'Collapse panel' : 'Keep panel open'}
+              >
+                {panelOpen
+                  ? <PanelRightClose aria-hidden="true" size={14} />
+                  : <PanelRightOpen aria-hidden="true" size={14} />}
+              </button>
             )}
 
             {isBroadcaster && (
@@ -661,72 +809,33 @@ function ExtensionPanel({ isOverlay }) {
           </div>
         )}
 
-        <div className="extension-zone-list" aria-live="polite">
-          {zones.map((zone) => {
-            const cards = zoneCards[zone.key] ?? [];
-            const isCollapsed = collapsedZones[zone.key];
+        {showDecklist ? (
+          <DecklistView
+            decklistData={decklistData}
+            onCardHover={handleCardMouseEnter}
+            onCardLeave={handlePreviewMouseLeave}
+            onCardClick={handlePreviewClick}
+          />
+        ) : (
+          <div className="extension-zone-list" aria-live="polite">
+            {zones.map((zone) => {
+              const cards = zoneCards[zone.key] ?? [];
+              const isCollapsed = collapsedZones[zone.key];
 
-            return (
-              <section className="extension-zone" key={zone.key}>
-                <button className="extension-zone-header" type="button" onClick={() => toggleZone(zone.key)}>
-                  {isCollapsed ? <ChevronRight aria-hidden="true" size={15} /> : <ChevronDown aria-hidden="true" size={15} />}
-                  <span>{zone.label}</span>
-                  <span className="extension-count">{countCards(cards)}</span>
-                </button>
+              return (
+                <section className="extension-zone" key={zone.key}>
+                  <button className="extension-zone-header" type="button" onClick={() => toggleZone(zone.key)}>
+                    {isCollapsed ? <ChevronRight aria-hidden="true" size={15} /> : <ChevronDown aria-hidden="true" size={15} />}
+                    <span>{zone.label}</span>
+                    <span className="extension-count">{countCards(cards)}</span>
+                  </button>
 
-                {!isCollapsed && (
-                  <div className="extension-card-list">
-                    {cards.length === 0 ? (
-                      <div className="extension-empty">No cards</div>
-                    ) : (
-                      cards.map((card) => (
-                        <button
-                          className="extension-card-row"
-                          type="button"
-                          key={`${zone.key}-${card.catalogId}-${card.name}`}
-                          onMouseEnter={(event) => handleCardMouseEnter(card, event)}
-                          onMouseLeave={handlePreviewMouseLeave}
-                          onClick={() => handlePreviewClick(card)}
-                        >
-                          <span className="extension-quantity">{card.quantity}</span>
-                          <span className="extension-card-main">
-                            <span className="extension-card-title">
-                              <span>{card.name}</span>
-                              <ManaCost manaCost={card.manaCost} />
-                            </span>
-                            <span className="extension-card-subtitle">{card.typeLine || `Catalog ID ${card.catalogId}`}</span>
-                          </span>
-                        </button>
-                      ))
-                    )}
-                  </div>
-                )}
-              </section>
-            );
-          })}
-
-          {hasOpponentZoneCards && (
-            <>
-              <div className="extension-zone-separator">Opponent</div>
-              {opponentZones.map((zone) => {
-                const cards = zoneCards[zone.key] ?? [];
-                const isCollapsed = collapsedZones[zone.key];
-
-                if (cards.length === 0) {
-                  return null;
-                }
-
-                return (
-                  <section className="extension-zone" key={zone.key}>
-                    <button className="extension-zone-header" type="button" onClick={() => toggleZone(zone.key)}>
-                      {isCollapsed ? <ChevronRight aria-hidden="true" size={15} /> : <ChevronDown aria-hidden="true" size={15} />}
-                      <span>{zone.label}</span>
-                      <span className="extension-count">{countCards(cards)}</span>
-                    </button>
-
-                    {!isCollapsed && (
-                      <div className="extension-card-list">
-                        {cards.map((card) => (
+                  {!isCollapsed && (
+                    <div className="extension-card-list">
+                      {cards.length === 0 ? (
+                        <div className="extension-empty">No cards</div>
+                      ) : (
+                        cards.map((card) => (
                           <button
                             className="extension-card-row"
                             type="button"
@@ -744,15 +853,63 @@ function ExtensionPanel({ isOverlay }) {
                               <span className="extension-card-subtitle">{card.typeLine || `Catalog ID ${card.catalogId}`}</span>
                             </span>
                           </button>
-                        ))}
-                      </div>
-                    )}
-                  </section>
-                );
-              })}
-            </>
-          )}
-        </div>
+                        ))
+                      )}
+                    </div>
+                  )}
+                </section>
+              );
+            })}
+
+            {hasOpponentZoneCards && (
+              <>
+                <div className="extension-zone-separator">Opponent</div>
+                {opponentZones.map((zone) => {
+                  const cards = zoneCards[zone.key] ?? [];
+                  const isCollapsed = collapsedZones[zone.key];
+
+                  if (cards.length === 0) {
+                    return null;
+                  }
+
+                  return (
+                    <section className="extension-zone" key={zone.key}>
+                      <button className="extension-zone-header" type="button" onClick={() => toggleZone(zone.key)}>
+                        {isCollapsed ? <ChevronRight aria-hidden="true" size={15} /> : <ChevronDown aria-hidden="true" size={15} />}
+                        <span>{zone.label}</span>
+                        <span className="extension-count">{countCards(cards)}</span>
+                      </button>
+
+                      {!isCollapsed && (
+                        <div className="extension-card-list">
+                          {cards.map((card) => (
+                            <button
+                              className="extension-card-row"
+                              type="button"
+                              key={`${zone.key}-${card.catalogId}-${card.name}`}
+                              onMouseEnter={(event) => handleCardMouseEnter(card, event)}
+                              onMouseLeave={handlePreviewMouseLeave}
+                              onClick={() => handlePreviewClick(card)}
+                            >
+                              <span className="extension-quantity">{card.quantity}</span>
+                              <span className="extension-card-main">
+                                <span className="extension-card-title">
+                                  <span>{card.name}</span>
+                                  <ManaCost manaCost={card.manaCost} />
+                                </span>
+                                <span className="extension-card-subtitle">{card.typeLine || `Catalog ID ${card.catalogId}`}</span>
+                              </span>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                    </section>
+                  );
+                })}
+              </>
+            )}
+          </div>
+        )}
       </section>
 
       {screenDetectionRegions.length > 0 && (
@@ -916,6 +1073,83 @@ function CardPreview({ card, cachedDetails, manaPoolPrice, docked = false, locke
   );
 }
 
+function DecklistView({ decklistData, onCardHover, onCardLeave, onCardClick }) {
+  if (!decklistData) {
+    return (
+      <div className="extension-decklist">
+        <div className="extension-empty">No deck loaded yet.</div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="extension-decklist" aria-live="polite">
+      <DecklistSection
+        label="MAIN DECK"
+        count={decklistData.mainCount}
+        groups={decklistData.main}
+        onCardHover={onCardHover}
+        onCardLeave={onCardLeave}
+        onCardClick={onCardClick}
+      />
+      <DecklistSection
+        label="SIDEBOARD"
+        count={decklistData.sideCount}
+        groups={decklistData.side}
+        onCardHover={onCardHover}
+        onCardLeave={onCardLeave}
+        onCardClick={onCardClick}
+      />
+    </div>
+  );
+}
+
+function DecklistSection({ label, count, groups, onCardHover, onCardLeave, onCardClick }) {
+  return (
+    <section>
+      <div className="extension-decklist-section-label">
+        <span>{label}</span>
+        <span>{count}</span>
+      </div>
+
+      {groups.length === 0 ? (
+        <div className="extension-empty">No cards</div>
+      ) : (
+        groups.map((group) => (
+          <div key={group.type}>
+            <div className="extension-decklist-type-label">{group.type}</div>
+            <div className="extension-card-list">
+              {group.cards.map((deckCard) => {
+                const card = normalizeDecklistCard(deckCard);
+
+                return (
+                  <button
+                    className="extension-card-row"
+                    type="button"
+                    key={`${label}-${deckCard.catalogId}-${deckCard.name}`}
+                    onMouseEnter={(event) => onCardHover(card, event)}
+                    onMouseLeave={onCardLeave}
+                    onClick={() => onCardClick(card)}
+                  >
+                    <span className="extension-quantity">{deckCard.quantity}</span>
+                    <span className="extension-card-main">
+                      <span className="extension-card-title">
+                        <span>{deckCard.name}</span>
+                        <ManaCost manaCost={deckCard.manaCost} />
+                      </span>
+                      <span className="extension-card-subtitle">{deckCard.typeLine || `Catalog ID ${deckCard.catalogId}`}</span>
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        ))
+      )}
+    </section>
+  );
+}
+
 function normalizeCard(card) {
   return {
     id: card.id,
@@ -925,6 +1159,18 @@ function normalizeCard(card) {
     typeLine: card.typeLine || '',
     oracleText: card.oracleText || '',
     imageUri: card.imageUrl || card.normalImageUri || card.imageUri || '',
+    quantity: 1
+  };
+}
+
+function normalizeDecklistCard(deckCard) {
+  return {
+    id: deckCard.catalogId,
+    catalogId: deckCard.catalogId,
+    name: deckCard.name,
+    manaCost: deckCard.manaCost,
+    typeLine: deckCard.typeLine,
+    imageUri: deckCard.imageUri,
     quantity: 1
   };
 }

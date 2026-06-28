@@ -48,8 +48,12 @@ public class MtgoLogParserService {
             "(?i)^.+?\\s+(casts|plays|discards|exiles|reveals|draws)\\s+(.+?)[\\.!]?$"
     );
 
-    private static final Pattern TWITCH_DECK_PATTERN = Pattern.compile(
-            "^\\d{2}:\\d{2}:\\d{2}\\s+\\[INF]\\s+\\(Twitch Info\\|Username:\\s+(.+?)\\s+Deck Used in Game ID:\\s+(\\d+)\\)\\s+(\\[.*])$"
+    private static final Pattern GAME_DECK_PATTERN = Pattern.compile(
+            "^\\d{2}:\\d{2}:\\d{2}\\s+\\[INF]\\s+\\(Twitch Info\\|Username:\\s+(.+?)\\s+Deck Used in Game ID:\\s*(\\d+)\\)\\s+(\\[.*])$"
+    );
+
+    private static final Pattern EVENT_DECK_PATTERN = Pattern.compile(
+            "^\\d{2}:\\d{2}:\\d{2}\\s+\\[INF]\\s+\\(Twitch Info\\|Username:\\s+(.+?)\\s+Deck Used to Join Event ID:\\s*(\\d+)\\)\\s+(\\[.*])$"
     );
 
     private static final Pattern GAME_STATUS_PATTERN = Pattern.compile(
@@ -112,7 +116,10 @@ public class MtgoLogParserService {
     }
 
     public Optional<DeckCatalogEvent> parseDeckCatalogEvent(String rawLine) {
-        Matcher matcher = TWITCH_DECK_PATTERN.matcher(rawLine.trim());
+        Matcher matcher = GAME_DECK_PATTERN.matcher(rawLine.trim());
+        if (!matcher.matches()) {
+            matcher = EVENT_DECK_PATTERN.matcher(rawLine.trim());
+        }
         if (!matcher.matches()) {
             return Optional.empty();
         }
@@ -120,6 +127,9 @@ public class MtgoLogParserService {
         String username = matcher.group(1).trim();
         long gameId = Long.parseLong(matcher.group(2));
         String deckJson = matcher.group(3);
+        if ("[NULL]".equalsIgnoreCase(deckJson)) {
+            return Optional.empty();
+        }
 
         try {
             DeckCatalogEntry[] entries = objectMapper.readValue(deckJson, DeckCatalogEntry[].class);
@@ -127,7 +137,11 @@ public class MtgoLogParserService {
                     gameId,
                     username,
                     Arrays.stream(entries)
-                            .map(DeckCatalogEntry::catalogId)
+                            .map(entry -> new DeckCard(
+                                    entry.catalogId(),
+                                    entry.quantity(),
+                                    entry.inSideboard()
+                            ))
                             .toList(),
                     rawLine
             ));
@@ -307,7 +321,11 @@ public class MtgoLogParserService {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
-    private record DeckCatalogEntry(@JsonProperty("CatalogId") int catalogId) {
+    private record DeckCatalogEntry(
+            @JsonProperty("CatalogId") int catalogId,
+            @JsonProperty("Quantity") int quantity,
+            @JsonProperty("InSideboard") boolean inSideboard
+    ) {
     }
 
     @JsonIgnoreProperties(ignoreUnknown = true)
