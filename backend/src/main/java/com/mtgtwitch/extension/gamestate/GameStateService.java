@@ -6,53 +6,48 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.EnumMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.OptionalInt;
 
 @Service
 public class GameStateService {
 
     private static final Logger log = LoggerFactory.getLogger(GameStateService.class);
+    private static final int MAX_CACHED_GAMES = 4;
+    private static final Duration STALE_GAME_TTL = Duration.ofMinutes(30);
 
-    private final Map<Zone, List<String>> zones = new EnumMap<>(Zone.class);
-    private final Map<Zone, List<GameCard>> zoneCards = new EnumMap<>(Zone.class);
-    private final Map<Zone, List<GameCard>> opponentZoneCards = new EnumMap<>(Zone.class);
+    private final Map<Long, PerGameState> games = new LinkedHashMap<>();
     private final GameStateBroadcaster gameStateBroadcaster;
-    private Long gameId;
-    private List<Integer> deckCatalogIds = List.of();
-    private List<DeckCard> deckCards = List.of();
-    private List<DetectionRegion> detectionRegions = List.of();
-    private List<PlayerState> players = List.of();
-    private String localPlayerName;
+    private Long activeGameId;
 
     public GameStateService(GameStateBroadcaster gameStateBroadcaster) {
         this.gameStateBroadcaster = gameStateBroadcaster;
-
-        for (Zone zone : Zone.values()) {
-            zones.put(zone, new ArrayList<>());
-            zoneCards.put(zone, new ArrayList<>());
-        }
-
-        opponentZoneCards.put(Zone.BATTLEFIELD, new ArrayList<>());
-        opponentZoneCards.put(Zone.GRAVEYARD, new ArrayList<>());
-        opponentZoneCards.put(Zone.EXILE, new ArrayList<>());
     }
 
     public synchronized GameState apply(CardZoneEvent event) {
+        PerGameState state = activeState();
+        state.markUpdated(Instant.now());
+
         if (event.sourceZone() != null) {
-            zones.get(event.sourceZone()).remove(event.cardName());
+            state.zones.get(event.sourceZone()).remove(event.cardName());
         } else {
-            removeFromTrackedZones(event.cardName(), event.destinationZone());
+            removeFromTrackedZones(state, event.cardName(), event.destinationZone());
         }
 
-        if (!zones.get(event.destinationZone()).contains(event.cardName())) {
-            zones.get(event.destinationZone()).add(event.cardName());
+        if (!state.zones.get(event.destinationZone()).contains(event.cardName())) {
+            state.zones.get(event.destinationZone()).add(event.cardName());
         }
+
+        evictOldGames(Instant.now());
 
         GameState gameState = snapshot();
         gameStateBroadcaster.broadcast(gameState);
@@ -60,20 +55,27 @@ public class GameStateService {
     }
 
     public synchronized GameState apply(GameStatusEvent event) {
-        resetForNewGame(event.gameId(), event.eventId());
-        gameId = event.gameId();
-        players = List.copyOf(event.players());
-        clearTrackedZones();
+        PerGameState state = stateForStatusEvent(event);
+        activeGameId = event.gameId();
+        state.gameId = event.gameId();
+        state.matchId = event.matchId();
+        state.players = List.copyOf(event.players());
+        state.markUpdated(Instant.now());
 
-        int localPlayerId = resolveLocalPlayerId();
+        evictFinishedGameFromSameMatch(state);
+        clearTrackedZones(state);
+
+        int localPlayerId = resolveLocalPlayerId(state);
         event.cards().stream()
                 .filter(card -> card.owner() == localPlayerId)
-                .forEach(this::addStatusCard);
+                .forEach(card -> addStatusCard(state, card));
 
-        clearOpponentPublicZones();
+        clearOpponentPublicZones(state);
         event.cards().stream()
                 .filter(card -> card.owner() != localPlayerId)
-                .forEach(this::addOpponentStatusCard);
+                .forEach(card -> addOpponentStatusCard(state, card));
+
+        evictOldGames(Instant.now());
 
         GameState gameState = snapshot();
         gameStateBroadcaster.broadcast(gameState);
@@ -81,30 +83,34 @@ public class GameStateService {
     }
 
     public synchronized GameState updateDeckCatalogIds(DeckCatalogEvent event) {
-        resetForNewGame(event.gameId());
-        gameId = event.gameId();
-        localPlayerName = event.username();
-        deckCards = List.copyOf(event.deckCards());
-        deckCatalogIds = deckCards.stream()
+        PerGameState state = stateForGame(event.gameId());
+        activeGameId = event.gameId();
+        state.gameId = event.gameId();
+        state.localPlayerName = event.username();
+        state.deckCards = List.copyOf(event.deckCards());
+        state.deckCatalogIds = state.deckCards.stream()
                 .map(DeckCard::catalogId)
                 .distinct()
                 .toList();
+        state.markUpdated(Instant.now());
 
-        int mainDeckCount = deckCards.stream()
+        int mainDeckCount = state.deckCards.stream()
                 .filter(card -> !card.inSideboard())
                 .mapToInt(DeckCard::quantity)
                 .sum();
-        int sideboardCount = deckCards.stream()
+        int sideboardCount = state.deckCards.stream()
                 .filter(DeckCard::inSideboard)
                 .mapToInt(DeckCard::quantity)
                 .sum();
         log.info(
                 "Deck refreshed: gameId={}, main={}, sideboard={}, distinct={}",
-                gameId,
+                state.gameId,
                 mainDeckCount,
                 sideboardCount,
-                deckCatalogIds.size()
+                state.deckCatalogIds.size()
         );
+
+        evictOldGames(Instant.now());
 
         GameState gameState = snapshot();
         gameStateBroadcaster.broadcast(gameState);
@@ -112,8 +118,12 @@ public class GameStateService {
     }
 
     public synchronized GameState updateDetectionRegions(List<DetectionRegion> nextDetectionRegions) {
-        pruneExpiredDetectionRegions(Instant.now());
-        detectionRegions = List.copyOf(nextDetectionRegions);
+        PerGameState state = activeState();
+        pruneExpiredDetectionRegions(state, Instant.now());
+        state.detectionRegions = List.copyOf(nextDetectionRegions);
+        state.markUpdated(Instant.now());
+
+        evictOldGames(Instant.now());
 
         GameState gameState = snapshot();
         gameStateBroadcaster.broadcast(gameState);
@@ -121,75 +131,121 @@ public class GameStateService {
     }
 
     public synchronized GameState snapshot() {
+        PerGameState state = activeState();
         Instant now = Instant.now();
-        pruneExpiredDetectionRegions(now);
+        pruneExpiredDetectionRegions(state, now);
+        evictOldGames(now);
 
         return new GameState(
-                List.copyOf(zones.get(Zone.HAND)),
-                List.copyOf(zones.get(Zone.BATTLEFIELD)),
-                List.copyOf(zones.get(Zone.GRAVEYARD)),
-                List.copyOf(zones.get(Zone.EXILE)),
-                List.copyOf(zoneCards.get(Zone.HAND)),
-                List.copyOf(zoneCards.get(Zone.BATTLEFIELD)),
-                List.copyOf(zoneCards.get(Zone.GRAVEYARD)),
-                List.copyOf(zoneCards.get(Zone.EXILE)),
-                List.copyOf(players),
-                gameId,
-                List.copyOf(deckCatalogIds),
-                List.copyOf(deckCards),
-                List.copyOf(detectionRegions),
-                List.copyOf(opponentZoneCards.get(Zone.BATTLEFIELD)),
-                List.copyOf(opponentZoneCards.get(Zone.GRAVEYARD)),
-                List.copyOf(opponentZoneCards.get(Zone.EXILE)),
+                List.copyOf(state.zones.get(Zone.HAND)),
+                List.copyOf(state.zones.get(Zone.BATTLEFIELD)),
+                List.copyOf(state.zones.get(Zone.GRAVEYARD)),
+                List.copyOf(state.zones.get(Zone.EXILE)),
+                List.copyOf(state.zoneCards.get(Zone.HAND)),
+                List.copyOf(state.zoneCards.get(Zone.BATTLEFIELD)),
+                List.copyOf(state.zoneCards.get(Zone.GRAVEYARD)),
+                List.copyOf(state.zoneCards.get(Zone.EXILE)),
+                List.copyOf(state.players),
+                state.gameId,
+                List.copyOf(state.deckCatalogIds),
+                List.copyOf(state.deckCards),
+                List.copyOf(state.detectionRegions),
+                List.copyOf(state.opponentZoneCards.get(Zone.BATTLEFIELD)),
+                List.copyOf(state.opponentZoneCards.get(Zone.GRAVEYARD)),
+                List.copyOf(state.opponentZoneCards.get(Zone.EXILE)),
                 now
         );
     }
 
-    private void removeFromTrackedZones(String cardName, Zone destinationZone) {
-        for (Map.Entry<Zone, List<String>> entry : zones.entrySet()) {
+    private PerGameState activeState() {
+        return stateForGame(activeGameId);
+    }
+
+    private PerGameState stateForGame(Long gameId) {
+        return games.computeIfAbsent(gameId, PerGameState::new);
+    }
+
+    private PerGameState stateForStatusEvent(GameStatusEvent event) {
+        PerGameState state = games.get(event.gameId());
+        if (state != null) {
+            return state;
+        }
+
+        PerGameState eventDeckState = games.remove(event.eventId());
+        state = stateForGame(event.gameId());
+        if (eventDeckState != null) {
+            state.localPlayerName = eventDeckState.localPlayerName;
+            state.deckCards = eventDeckState.deckCards;
+            state.deckCatalogIds = eventDeckState.deckCatalogIds;
+            state.detectionRegions = eventDeckState.detectionRegions;
+        }
+
+        return state;
+    }
+
+    private void evictFinishedGameFromSameMatch(PerGameState activeState) {
+        if (activeState.gameId == null || activeState.matchId == null) {
+            return;
+        }
+
+        games.entrySet().removeIf(entry -> {
+            PerGameState state = entry.getValue();
+            return state.gameId != null
+                    && !state.gameId.equals(activeState.gameId)
+                    && activeState.matchId.equals(state.matchId);
+        });
+    }
+
+    private void evictOldGames(Instant now) {
+        games.entrySet().removeIf(entry -> {
+            if (Objects.equals(entry.getKey(), activeGameId)) {
+                return false;
+            }
+            PerGameState state = entry.getValue();
+            return !Objects.equals(entry.getKey(), activeGameId)
+                    && state.lastUpdatedAt.plus(STALE_GAME_TTL).isBefore(now);
+        });
+
+        while (games.size() > MAX_CACHED_GAMES) {
+            Long oldestGameId = games.entrySet().stream()
+                    .filter(entry -> !Objects.equals(entry.getKey(), activeGameId))
+                    .min(Comparator.comparing(entry -> entry.getValue().lastUpdatedAt))
+                    .map(Map.Entry::getKey)
+                    .orElse(null);
+
+            if (oldestGameId == null) {
+                return;
+            }
+
+            games.remove(oldestGameId);
+        }
+    }
+
+    private void removeFromTrackedZones(PerGameState state, String cardName, Zone destinationZone) {
+        for (Map.Entry<Zone, List<String>> entry : state.zones.entrySet()) {
             if (entry.getKey() != destinationZone) {
                 entry.getValue().remove(cardName);
             }
         }
     }
 
-    private void clearTrackedZones() {
+    private void clearTrackedZones(PerGameState state) {
         for (Zone zone : Zone.values()) {
-            zones.get(zone).clear();
-            zoneCards.get(zone).clear();
+            state.zones.get(zone).clear();
+            state.zoneCards.get(zone).clear();
         }
-        clearOpponentPublicZones();
+        clearOpponentPublicZones(state);
     }
 
-    private void clearOpponentPublicZones() {
-        opponentZoneCards.get(Zone.BATTLEFIELD).clear();
-        opponentZoneCards.get(Zone.GRAVEYARD).clear();
-        opponentZoneCards.get(Zone.EXILE).clear();
+    private void clearOpponentPublicZones(PerGameState state) {
+        state.opponentZoneCards.get(Zone.BATTLEFIELD).clear();
+        state.opponentZoneCards.get(Zone.GRAVEYARD).clear();
+        state.opponentZoneCards.get(Zone.EXILE).clear();
     }
 
-    private void resetForNewGame(long nextGameId) {
-        resetForNewGame(nextGameId, null);
-    }
-
-    private void resetForNewGame(long nextGameId, Long eventId) {
-        if (gameId != null && gameId != nextGameId) {
-            boolean preserveEventDeck = eventId != null && gameId == eventId;
-            clearTrackedZones();
-            if (!preserveEventDeck) {
-                deckCatalogIds = List.of();
-                deckCards = List.of();
-            }
-            detectionRegions = List.of();
-            players = List.of();
-            if (!preserveEventDeck) {
-                localPlayerName = null;
-            }
-        }
-    }
-
-    private int resolveLocalPlayerId() {
-        OptionalInt playerIdByName = players.stream()
-                .filter(player -> namesMatch(player.name(), localPlayerName))
+    private int resolveLocalPlayerId(PerGameState state) {
+        OptionalInt playerIdByName = state.players.stream()
+                .filter(player -> namesMatch(player.name(), state.localPlayerName))
                 .mapToInt(PlayerState::id)
                 .findFirst();
 
@@ -197,11 +253,11 @@ public class GameStateService {
             return playerIdByName.getAsInt();
         }
 
-        if (localPlayerName != null && !localPlayerName.isBlank()) {
-            log.warn("Local player name '{}' did not match any player — falling back to first player.", localPlayerName);
+        if (state.localPlayerName != null && !state.localPlayerName.isBlank()) {
+            log.warn("Local player name '{}' did not match any player — falling back to first player.", state.localPlayerName);
         }
 
-        return players.isEmpty() ? 0 : players.getFirst().id();
+        return state.players.isEmpty() ? 0 : state.players.getFirst().id();
     }
 
     private boolean namesMatch(String playerName, String expectedName) {
@@ -212,25 +268,57 @@ public class GameStateService {
         return playerName.toLowerCase(Locale.ROOT).equals(expectedName.toLowerCase(Locale.ROOT));
     }
 
-    private void addStatusCard(GameCard card) {
+    private void addStatusCard(PerGameState state, GameCard card) {
         Zone.fromLogText(card.actualZone())
                 .filter(zone -> zone != Zone.EXILE || card.zone().equalsIgnoreCase("Exile"))
                 .ifPresent(zone -> {
-                    zoneCards.get(zone).add(card);
-                    zones.get(zone).add(card.displayName());
+                    state.zoneCards.get(zone).add(card);
+                    state.zones.get(zone).add(card.displayName());
                 });
     }
 
-    private void addOpponentStatusCard(GameCard card) {
+    private void addOpponentStatusCard(PerGameState state, GameCard card) {
         Zone.fromLogText(card.actualZone())
                 .filter(zone -> zone == Zone.BATTLEFIELD || zone == Zone.GRAVEYARD || zone == Zone.EXILE)
                 .filter(zone -> zone != Zone.EXILE || card.zone().equalsIgnoreCase("Exile"))
-                .ifPresent(zone -> opponentZoneCards.get(zone).add(card));
+                .ifPresent(zone -> state.opponentZoneCards.get(zone).add(card));
     }
 
-    private void pruneExpiredDetectionRegions(Instant now) {
-        detectionRegions = detectionRegions.stream()
+    private void pruneExpiredDetectionRegions(PerGameState state, Instant now) {
+        state.detectionRegions = state.detectionRegions.stream()
                 .filter(region -> region.expiresAt() != null && region.expiresAt().isAfter(now))
                 .toList();
+    }
+
+    private static class PerGameState {
+
+        private final Map<Zone, List<String>> zones = new EnumMap<>(Zone.class);
+        private final Map<Zone, List<GameCard>> zoneCards = new EnumMap<>(Zone.class);
+        private final Map<Zone, List<GameCard>> opponentZoneCards = new EnumMap<>(Zone.class);
+        private Long gameId;
+        private Long matchId;
+        private List<Integer> deckCatalogIds = List.of();
+        private List<DeckCard> deckCards = List.of();
+        private List<DetectionRegion> detectionRegions = List.of();
+        private List<PlayerState> players = List.of();
+        private String localPlayerName;
+        private Instant lastUpdatedAt = Instant.now();
+
+        private PerGameState(Long gameId) {
+            this.gameId = gameId;
+
+            for (Zone zone : Zone.values()) {
+                zones.put(zone, new ArrayList<>());
+                zoneCards.put(zone, new ArrayList<>());
+            }
+
+            opponentZoneCards.put(Zone.BATTLEFIELD, new ArrayList<>());
+            opponentZoneCards.put(Zone.GRAVEYARD, new ArrayList<>());
+            opponentZoneCards.put(Zone.EXILE, new ArrayList<>());
+        }
+
+        private void markUpdated(Instant now) {
+            lastUpdatedAt = now;
+        }
     }
 }
