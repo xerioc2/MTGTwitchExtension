@@ -90,6 +90,22 @@ public class GameStateService {
                 .distinct()
                 .toList();
 
+        int mainDeckCount = deckCards.stream()
+                .filter(card -> !card.inSideboard())
+                .mapToInt(DeckCard::quantity)
+                .sum();
+        int sideboardCount = deckCards.stream()
+                .filter(DeckCard::inSideboard)
+                .mapToInt(DeckCard::quantity)
+                .sum();
+        log.info(
+                "Deck refreshed: gameId={}, main={}, sideboard={}, distinct={}",
+                gameId,
+                mainDeckCount,
+                sideboardCount,
+                deckCatalogIds.size()
+        );
+
         GameState gameState = snapshot();
         gameStateBroadcaster.broadcast(gameState);
         return gameState;

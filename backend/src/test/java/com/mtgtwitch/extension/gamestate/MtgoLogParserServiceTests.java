@@ -198,6 +198,31 @@ class MtgoLogParserServiceTests {
         GameState gameState = gameStateService.snapshot();
         assertThat(gameState.gameId()).isEqualTo(950571149);
         assertThat(gameState.deckCatalogIds()).isEmpty();
+        assertThat(gameState.deckCards()).isEmpty();
         assertThat(gameState.handCards()).extracting(GameCard::catalogId).containsExactly(78632);
+    }
+
+    @Test
+    void replacesDeckCardsAndCatalogIdsWhenNextGameDeckLineArrives() {
+        ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
+        GameStateService gameStateService = new GameStateService(new GameStateBroadcaster(objectMapper));
+        MtgoLogParserService applyingParser = new MtgoLogParserService(gameStateService, objectMapper);
+
+        applyingParser.parseAndApply("""
+                20:36:01 [INF] (Twitch Info|Username: DB_xerioc Deck Used in Game ID: 950571148) [{"CatalogId":126449,"Quantity":3,"Annotation":"NotSet","InSideboard":false},{"CatalogId":106607,"Quantity":4,"Annotation":"NotSet","InSideboard":true}]
+                """.trim());
+
+        applyingParser.parseAndApply("""
+                20:42:12 [INF] (Twitch Info|Username: DB_xerioc Deck Used in Game ID: 950571149) [{"CatalogId":78632,"Quantity":2,"Annotation":"NotSet","InSideboard":false},{"CatalogId":144288,"Quantity":1,"Annotation":"NotSet","InSideboard":true}]
+                """.trim());
+
+        GameState gameState = gameStateService.snapshot();
+        assertThat(gameState.gameId()).isEqualTo(950571149);
+        assertThat(gameState.deckCatalogIds()).containsExactly(78632, 144288);
+        assertThat(gameState.deckCatalogIds()).doesNotContain(126449, 106607);
+        assertThat(gameState.deckCards()).containsExactly(
+                new DeckCard(78632, 2, false),
+                new DeckCard(144288, 1, true)
+        );
     }
 }
