@@ -119,6 +119,10 @@ function manaPoolUrl(cardName) {
   return `https://manapool.com/card/${toManaPoolSlug(cardName)}?ref=${MANA_POOL_REF}`;
 }
 
+function manaPoolDeckUrl() {
+  return `https://manapool.com/?ref=${MANA_POOL_REF}`;
+}
+
 export default function App() {
   if (window.location.pathname === '/debug') {
     return <DebugPage />;
@@ -152,6 +156,8 @@ function ExtensionPanel({ isOverlay }) {
   const [isRescanning, setIsRescanning] = useState(false);
   const [isBroadcaster, setIsBroadcaster] = useState(false);
   const [showDecklist, setShowDecklist] = useState(false);
+  const [showDeckExport, setShowDeckExport] = useState(false);
+  const [deckExportCopyStatus, setDeckExportCopyStatus] = useState('');
   const [panelOpen, setPanelOpen] = useState(
     () => window.localStorage.getItem('mtgtwitch.panelOpen') === 'true'
   );
@@ -481,6 +487,23 @@ function ExtensionPanel({ isOverlay }) {
       sideCount: side.reduce((sum, card) => sum + card.quantity, 0)
     };
   }, [gameState.deckCards, cardDetailsByCatalogId]);
+
+  const deckExportSections = useMemo(() => (
+    buildDeckExportSections(gameState.deckCards ?? [], cardDetailsByCatalogId)
+  ), [cardDetailsByCatalogId, gameState.deckCards]);
+
+  const deckExportText = useMemo(() => (
+    formatDeckExportText(deckExportSections)
+  ), [deckExportSections]);
+
+  const deckExportEntries = useMemo(() => (
+    [...deckExportSections.main, ...deckExportSections.sideboard]
+  ), [deckExportSections]);
+
+  const isDeckExportResolving = showDeckExport && deckExportEntries.some((entry) => (
+    !entry.name && !failedCatalogIds[entry.catalogId]
+  ));
+
   const hasOpponentZoneCards = opponentZones.some((zone) => (zoneCards[zone.key] ?? []).length > 0);
   const screenDetectionRegions = useScreenDetections({
     enabled: isOverlay && enableScreenDetections,
@@ -531,6 +554,35 @@ function ExtensionPanel({ isOverlay }) {
     };
   }, [cardDetailsByCatalogId, catalogIdsToResolve, failedCatalogIds, fetchCardDetails, fetchManaPoolPricesBatch]);
 
+  useEffect(() => {
+    if (!showDeckExport) {
+      return undefined;
+    }
+
+    let isCancelled = false;
+
+    async function resolveDeckExportCards() {
+      const unresolvedCatalogIds = deckExportEntries
+        .map((entry) => entry.catalogId)
+        .filter((catalogId) => !cardDetailsByCatalogId[catalogId] && !failedCatalogIds[catalogId]);
+
+      for (const catalogId of unresolvedCatalogIds) {
+        if (isCancelled) {
+          return;
+        }
+
+        await fetchCardDetails(catalogId, { cacheFailures: true });
+        await sleep(60);
+      }
+    }
+
+    resolveDeckExportCards();
+
+    return () => {
+      isCancelled = true;
+    };
+  }, [cardDetailsByCatalogId, deckExportEntries, failedCatalogIds, fetchCardDetails, showDeckExport]);
+
   const isConnected = connectionState === 'connected';
   const isPinnedPanelEnabled = enableScreenDetections && pinPanel;
   const activePreviewCard = isPinnedPanelEnabled ? panelCard : hoveredCard;
@@ -565,6 +617,15 @@ function ExtensionPanel({ isOverlay }) {
       setRescanStatus('Backend unavailable');
     } finally {
       setIsRescanning(false);
+    }
+  }
+
+  async function handleCopyDeckExport() {
+    try {
+      await navigator.clipboard.writeText(deckExportText);
+      setDeckExportCopyStatus('Copied');
+    } catch {
+      setDeckExportCopyStatus('Copy failed');
     }
   }
 
@@ -776,6 +837,13 @@ function ExtensionPanel({ isOverlay }) {
               </button>
             )}
 
+            {gameState.deckCards?.length > 0 && (
+              <button className="extension-icon-button" type="button" onClick={() => setShowDeckExport(true)}>
+                <BookOpen aria-hidden="true" size={14} />
+                <span>Export deck</span>
+              </button>
+            )}
+
             {isOverlay && (
               <button
                 className="extension-icon-button"
@@ -947,6 +1015,19 @@ function ExtensionPanel({ isOverlay }) {
           locked={Boolean(lockedPanelCardKey)}
           onUnlock={handleUnlockPanel}
           onClose={handleClosePanel}
+        />
+      )}
+
+      {showDeckExport && (
+        <DeckExportPanel
+          deckText={deckExportText}
+          isResolving={isDeckExportResolving}
+          copyStatus={deckExportCopyStatus}
+          onCopy={handleCopyDeckExport}
+          onClose={() => {
+            setShowDeckExport(false);
+            setDeckExportCopyStatus('');
+          }}
         />
       )}
     </main>
@@ -1150,6 +1231,41 @@ function DecklistSection({ label, count, groups, onCardHover, onCardLeave, onCar
   );
 }
 
+function DeckExportPanel({ deckText, isResolving, copyStatus, onCopy, onClose }) {
+  return (
+    <div className="extension-modal-backdrop">
+      <section className="extension-deck-export" aria-labelledby="extension-deck-export-title">
+        <header className="extension-deck-export-header">
+          <div>
+            <h2 id="extension-deck-export-title">Export deck</h2>
+            <p>{isResolving ? 'Resolving card names...' : 'Ready to copy or open externally.'}</p>
+          </div>
+          <button className="extension-deck-export-close" type="button" onClick={onClose}>
+            Close
+          </button>
+        </header>
+
+        <textarea
+          className="extension-deck-export-text"
+          readOnly
+          value={deckText}
+          aria-label="Decklist export text"
+        />
+
+        <div className="extension-deck-export-actions">
+          <button className="extension-icon-button" type="button" onClick={onCopy} disabled={!deckText}>
+            <span>Copy to clipboard</span>
+          </button>
+          <a className="extension-deck-export-link" href={manaPoolDeckUrl()} target="_blank" rel="noreferrer">
+            Open in ManaPool
+          </a>
+          {copyStatus && <span className="extension-deck-export-status">{copyStatus}</span>}
+        </div>
+      </section>
+    </div>
+  );
+}
+
 function normalizeCard(card) {
   return {
     id: card.id,
@@ -1215,6 +1331,51 @@ function groupDuplicates(cards, cardDetailsByCatalogId) {
   }
 
   return Array.from(groupedCards.values());
+}
+
+function buildDeckExportSections(deckCards, cardDetailsByCatalogId) {
+  const entries = deckCards
+    .filter((deckCard) => deckCard.catalogId && deckCard.quantity > 0)
+    .map((deckCard) => ({
+      catalogId: deckCard.catalogId,
+      quantity: deckCard.quantity,
+      inSideboard: Boolean(deckCard.inSideboard),
+      name: cardDetailsByCatalogId[deckCard.catalogId]?.name ?? null
+    }));
+
+  function sortByName(first, second) {
+    return (first.name ?? `CatalogID ${first.catalogId}`)
+      .localeCompare(second.name ?? `CatalogID ${second.catalogId}`);
+  }
+
+  return {
+    main: entries
+      .filter((entry) => !entry.inSideboard)
+      .sort(sortByName),
+    sideboard: entries
+      .filter((entry) => entry.inSideboard)
+      .sort(sortByName)
+  };
+}
+
+function formatDeckExportText(deckExportSections) {
+  const mainLines = deckExportSections.main.map((entry) => (
+    `${entry.quantity} ${entry.name ?? `CatalogID ${entry.catalogId}`}`
+  ));
+  const sideboardLines = deckExportSections.sideboard.map((entry) => (
+    `${entry.quantity} ${entry.name ?? `CatalogID ${entry.catalogId}`}`
+  ));
+
+  if (sideboardLines.length === 0) {
+    return mainLines.join('\n');
+  }
+
+  return [
+    ...mainLines,
+    '',
+    'Sideboard:',
+    ...sideboardLines
+  ].join('\n');
 }
 
 function countCards(cards) {

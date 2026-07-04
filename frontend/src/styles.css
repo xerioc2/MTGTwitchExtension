@@ -254,6 +254,92 @@ textarea {
   text-transform: uppercase;
 }
 
+.extension-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 14px;
+  background: rgba(0, 0, 0, 0.38);
+  pointer-events: auto;
+}
+
+.extension-deck-export {
+  width: min(420px, calc(100vw - 28px));
+  max-height: calc(100vh - 28px);
+  display: flex;
+  flex-direction: column;
+  border: 1px solid #4f4739;
+  border-radius: 6px;
+  background: #171511;
+  box-shadow: 0 18px 52px rgba(0, 0, 0, 0.52);
+}
+
+.extension-deck-export-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px;
+  border-bottom: 1px solid #34302a;
+  background: #222019;
+}
+
+.extension-deck-export-header p {
+  margin-top: 4px;
+  color: #aaa194;
+  font-size: 0.72rem;
+}
+
+.extension-deck-export-close,
+.extension-deck-export-link {
+  min-height: 25px;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0 7px;
+  border: 1px solid #454034;
+  border-radius: 4px;
+  background: #181713;
+  color: #e7dfd3;
+  font-size: 0.68rem;
+  text-decoration: none;
+  text-transform: uppercase;
+}
+
+.extension-deck-export-close {
+  cursor: pointer;
+}
+
+.extension-deck-export-text {
+  min-height: 280px;
+  flex: 1;
+  resize: vertical;
+  padding: 10px;
+  border: 0;
+  border-bottom: 1px solid #34302a;
+  background: #10100f;
+  color: #f0e6d8;
+  font-family: ui-monospace, "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-size: 0.74rem;
+  line-height: 1.45;
+}
+
+.extension-deck-export-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+}
+
+.extension-deck-export-status {
+  color: #8fdbad;
+  font-size: 0.72rem;
+}
+
 .extension-zone {
   border: 1px solid #302d27;
   background: #12110f;
