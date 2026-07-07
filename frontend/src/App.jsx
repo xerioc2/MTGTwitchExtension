@@ -179,6 +179,8 @@ function ExtensionPanel({ isOverlay }) {
   const [failedCatalogIds, setFailedCatalogIds] = useState({});
   const [manaPoolPriceByName, setManaPoolPriceByName] = useState({});
   const fetchedManaPoolKeys = useRef(new Set());
+  const [reconnectNonce, setReconnectNonce] = useState(0);
+  const reconnectAttemptsRef = useRef(0);
   const activeSupabaseChannelId = shouldUseSupabaseRelay ? relayChannelId : null;
 
   const fetchManaPoolPrice = useCallback(async (cardName) => {
@@ -309,6 +311,21 @@ function ExtensionPanel({ isOverlay }) {
   }, []);
 
   useEffect(() => {
+    // Reconnect-on-drop: a dead channel/socket schedules a resubscribe with
+    // capped backoff instead of freezing on stale data until a page refresh.
+    let disposed = false;
+    let reconnectTimer = null;
+
+    const scheduleReconnect = () => {
+      if (disposed || reconnectTimer !== null) {
+        return;
+      }
+
+      const delayMs = Math.min(15000, 1000 * 2 ** Math.min(reconnectAttemptsRef.current, 4));
+      reconnectAttemptsRef.current += 1;
+      reconnectTimer = window.setTimeout(() => setReconnectNonce((nonce) => nonce + 1), delayMs);
+    };
+
     if (shouldUseSupabaseRelay) {
       if (!activeSupabaseChannelId) {
         return undefined;
@@ -325,17 +342,24 @@ function ExtensionPanel({ isOverlay }) {
         })
         .subscribe((status) => {
           if (status === 'SUBSCRIBED') {
+            reconnectAttemptsRef.current = 0;
             setConnectionState('connected');
             setLastError('');
           } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
             setConnectionState('error');
-            setLastError(`Supabase relay ${status.toLowerCase().replace('_', ' ')}.`);
+            setLastError(`Supabase relay ${status.toLowerCase().replace('_', ' ')}. Reconnecting...`);
+            scheduleReconnect();
           } else if (status === 'CLOSED') {
             setConnectionState('disconnected');
+            scheduleReconnect();
           }
         });
 
       return () => {
+        disposed = true;
+        if (reconnectTimer !== null) {
+          window.clearTimeout(reconnectTimer);
+        }
         supabase.removeChannel(channel);
       };
     }
@@ -353,6 +377,7 @@ function ExtensionPanel({ isOverlay }) {
     }
 
     socket.addEventListener('open', () => {
+      reconnectAttemptsRef.current = 0;
       setConnectionState('connected');
     });
 
@@ -367,16 +392,22 @@ function ExtensionPanel({ isOverlay }) {
 
     socket.addEventListener('close', () => {
       setConnectionState('disconnected');
+      scheduleReconnect();
     });
 
     socket.addEventListener('error', () => {
       setConnectionState('error');
+      scheduleReconnect();
     });
 
     return () => {
+      disposed = true;
+      if (reconnectTimer !== null) {
+        window.clearTimeout(reconnectTimer);
+      }
       socket.close();
     };
-  }, [activeSupabaseChannelId]);
+  }, [activeSupabaseChannelId, reconnectNonce]);
 
   const zoneCards = useMemo(() => {
     const nextZoneCards = {};
