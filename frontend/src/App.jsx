@@ -155,6 +155,9 @@ function ExtensionPanel({ isOverlay }) {
   const [rescanStatus, setRescanStatus] = useState('');
   const [isRescanning, setIsRescanning] = useState(false);
   const [isBroadcaster, setIsBroadcaster] = useState(false);
+  const [relayChannelId, setRelayChannelId] = useState(() => (
+    window.Twitch?.ext?.onAuthorized ? '' : supabaseConfig.channelId
+  ));
   const [showDecklist, setShowDecklist] = useState(false);
   const [showDeckExport, setShowDeckExport] = useState(false);
   const [deckExportCopyStatus, setDeckExportCopyStatus] = useState('');
@@ -176,6 +179,7 @@ function ExtensionPanel({ isOverlay }) {
   const [failedCatalogIds, setFailedCatalogIds] = useState({});
   const [manaPoolPriceByName, setManaPoolPriceByName] = useState({});
   const fetchedManaPoolKeys = useRef(new Set());
+  const activeSupabaseChannelId = shouldUseSupabaseRelay ? relayChannelId : null;
 
   const fetchManaPoolPrice = useCallback(async (cardName) => {
     if (!manaPoolUrl(cardName)) {
@@ -306,8 +310,12 @@ function ExtensionPanel({ isOverlay }) {
 
   useEffect(() => {
     if (shouldUseSupabaseRelay) {
+      if (!activeSupabaseChannelId) {
+        return undefined;
+      }
+
       const supabase = createClient(supabaseConfig.url, supabaseConfig.anonKey);
-      const channel = supabase.channel(`game-state:${supabaseConfig.channelId}`);
+      const channel = supabase.channel(`game-state:${activeSupabaseChannelId}`);
 
       channel
         .on('broadcast', { event: 'game-state' }, (message) => {
@@ -368,7 +376,7 @@ function ExtensionPanel({ isOverlay }) {
     return () => {
       socket.close();
     };
-  }, []);
+  }, [activeSupabaseChannelId]);
 
   const zoneCards = useMemo(() => {
     const nextZoneCards = {};
@@ -514,10 +522,14 @@ function ExtensionPanel({ isOverlay }) {
     if (window.Twitch?.ext?.onAuthorized) {
       window.Twitch.ext.onAuthorized((auth) => {
         setIsBroadcaster(auth.role === 'broadcaster');
+        if (auth.channelId) {
+          setRelayChannelId(String(auth.channelId));
+        }
       });
     } else {
       // Local dev outside Twitch sandbox: keep broadcaster tools reachable.
       setIsBroadcaster(true);
+      setRelayChannelId(supabaseConfig.channelId);
     }
   }, []);
 

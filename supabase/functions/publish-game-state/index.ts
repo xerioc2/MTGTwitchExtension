@@ -8,6 +8,7 @@ type PublishRequest = {
 };
 
 type StreamerRelayRow = {
+  twitch_user_id: string;
   twitch_login: string;
 };
 
@@ -48,8 +49,10 @@ Deno.serve(async (request) => {
     return json({ error: "Unauthorized" }, 401);
   }
 
-  const channelId = sanitizeChannelId(relay.twitch_login);
-  if (!channelId) {
+  const twitchUserChannelId = sanitizeChannelId(relay.twitch_user_id);
+  const twitchLoginChannelId = sanitizeChannelId(relay.twitch_login);
+  const channelIds = Array.from(new Set([twitchUserChannelId, twitchLoginChannelId].filter(Boolean)));
+  if (channelIds.length === 0) {
     return json({ error: "Invalid streamer relay channel" }, 500);
   }
 
@@ -60,13 +63,11 @@ Deno.serve(async (request) => {
       ...supabaseHeaders()
     },
     body: JSON.stringify({
-      messages: [
-        {
-          topic: `game-state:${channelId}`,
-          event: GAME_STATE_EVENT,
-          payload: payload.gameState
-        }
-      ]
+      messages: channelIds.map((channelId) => ({
+        topic: `game-state:${channelId}`,
+        event: GAME_STATE_EVENT,
+        payload: payload.gameState
+      }))
     })
   });
 
@@ -74,7 +75,7 @@ Deno.serve(async (request) => {
     return json({ error: "Failed to publish game state" }, 502);
   }
 
-  return json({ ok: true, channelId });
+  return json({ ok: true, channelIds });
 });
 
 function bearerToken(request: Request) {
@@ -86,7 +87,7 @@ async function findStreamerRelay(bridgeTokenHash: string) {
   const params = new URLSearchParams({
     bridge_token_hash: `eq.${bridgeTokenHash}`,
     revoked_at: "is.null",
-    select: "twitch_login",
+    select: "twitch_user_id,twitch_login",
     limit: "1"
   });
 
