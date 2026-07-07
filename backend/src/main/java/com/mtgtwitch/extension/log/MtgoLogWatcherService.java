@@ -1,6 +1,8 @@
 package com.mtgtwitch.extension.log;
 
 import com.mtgtwitch.extension.gamestate.MtgoLogParserService;
+import com.mtgtwitch.extension.gamestate.DeckCard;
+import com.mtgtwitch.extension.gamestate.GameState;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
@@ -18,6 +20,8 @@ import java.nio.file.StandardWatchEventKinds;
 import java.nio.file.WatchEvent;
 import java.nio.file.WatchKey;
 import java.nio.file.WatchService;
+import java.util.LinkedHashSet;
+import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
@@ -31,6 +35,7 @@ public class MtgoLogWatcherService {
     private static final Logger log = LoggerFactory.getLogger(MtgoLogWatcherService.class);
 
     private final boolean rawLogDebugEnabled;
+    private final long backfillBytes;
     private final MtgoLogDiscoveryService mtgoLogDiscoveryService;
     private final MtgoLogParserService mtgoLogParserService;
     private final ExecutorService executorService;
@@ -45,10 +50,12 @@ public class MtgoLogWatcherService {
 
     public MtgoLogWatcherService(
             @Value("${mtgo.debug.raw-log:false}") boolean rawLogDebugEnabled,
+            @Value("${mtgo.log.backfill-bytes:5242880}") long backfillBytes,
             MtgoLogDiscoveryService mtgoLogDiscoveryService,
             MtgoLogParserService mtgoLogParserService
     ) {
         this.rawLogDebugEnabled = rawLogDebugEnabled;
+        this.backfillBytes = Math.max(0, backfillBytes);
         this.mtgoLogDiscoveryService = mtgoLogDiscoveryService;
         this.mtgoLogParserService = mtgoLogParserService;
         this.executorService = Executors.newSingleThreadExecutor(runnable -> {
@@ -111,7 +118,7 @@ public class MtgoLogWatcherService {
         }
 
         try {
-            lastKnownPosition = Files.exists(logPath) ? Files.size(logPath) : 0;
+            lastKnownPosition = backfillLogTail(logPath);
             if (rawLogDebugEnabled) {
                 log.info("MTGO raw log debug mode is enabled; every new raw mtgo.log line will be written to the console.");
             }
@@ -143,6 +150,71 @@ public class MtgoLogWatcherService {
             log.error("Failed to start MTGO log watcher for {}", logPath, exception);
             return new LogWatchStatus(logPath.toString(), false, "Failed to start MTGO log watcher: " + exception.getMessage());
         }
+    }
+
+    private long backfillLogTail(Path activeLogPath) throws IOException {
+        if (!Files.exists(activeLogPath)) {
+            return 0;
+        }
+
+        long fileSize = Files.size(activeLogPath);
+        long windowSize = Math.min(fileSize, backfillBytes);
+        long startPosition = Math.max(0, fileSize - windowSize);
+        int linesParsed = 0;
+        Set<Long> gameIdsSeen = new LinkedHashSet<>();
+        GameState resultingState;
+
+        mtgoLogParserService.beginReplay();
+        try (RandomAccessFile file = new RandomAccessFile(activeLogPath.toFile(), "r")) {
+            file.seek(startPosition);
+            if (startPosition > 0) {
+                file.readLine();
+            }
+
+            String line;
+            while ((line = file.readLine()) != null) {
+                String decodedLine = new String(line.getBytes(StandardCharsets.ISO_8859_1), StandardCharsets.UTF_8);
+                if (rawLogDebugEnabled) {
+                    log.info("MTGO raw log backfill line: {}", decodedLine);
+                }
+
+                mtgoLogParserService.parseDeckCatalogEvent(decodedLine)
+                        .ifPresent(event -> gameIdsSeen.add(event.gameId()));
+                mtgoLogParserService.parseGameStatusEvent(decodedLine)
+                        .ifPresent(event -> gameIdsSeen.add(event.gameId()));
+                mtgoLogParserService.parseAndApply(decodedLine);
+                linesParsed++;
+            }
+
+            resultingState = mtgoLogParserService.endReplay();
+            long consumedPosition = file.getFilePointer();
+            logBackfillSummary(windowSize, linesParsed, gameIdsSeen, resultingState);
+            return consumedPosition;
+        } catch (RuntimeException | IOException exception) {
+            mtgoLogParserService.endReplay();
+            throw exception;
+        }
+    }
+
+    private void logBackfillSummary(long windowSize, int linesParsed, Set<Long> gameIdsSeen, GameState gameState) {
+        int mainDeckCount = gameState.deckCards().stream()
+                .filter(card -> !card.inSideboard())
+                .mapToInt(DeckCard::quantity)
+                .sum();
+        int sideboardCount = gameState.deckCards().stream()
+                .filter(DeckCard::inSideboard)
+                .mapToInt(DeckCard::quantity)
+                .sum();
+
+        log.info(
+                "MTGO log backfill complete: windowBytes={}, linesParsed={}, gameIdsSeen={}, activeGameId={}, deckMain={}, deckSideboard={}",
+                windowSize,
+                linesParsed,
+                gameIdsSeen,
+                gameState.gameId(),
+                mainDeckCount,
+                sideboardCount
+        );
     }
 
     private void stopCurrentWatcher() {

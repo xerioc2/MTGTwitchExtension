@@ -14,6 +14,7 @@ management:
 mtgo:
   log:
     path: ${MTGO_LOG_PATH:}
+    backfill-bytes: ${MTGO_LOG_BACKFILL_BYTES:5242880}
   debug:
     raw-log: ${MTGO_DEBUG_RAW_LOG:false}
 

@@ -68,6 +68,18 @@ public class MtgoLogParserService {
         this.objectMapper = objectMapper;
     }
 
+    public void beginReplay() {
+        gameStateService.beginReplay();
+    }
+
+    public GameState endReplay() {
+        return gameStateService.endReplay();
+    }
+
+    public GameState snapshot() {
+        return gameStateService.snapshot();
+    }
+
     public Optional<CardZoneEvent> parseAndApply(String rawLine) {
         Optional<DeckCatalogEvent> deckCatalogEvent = parseDeckCatalogEvent(rawLine);
         if (deckCatalogEvent.isPresent()) {

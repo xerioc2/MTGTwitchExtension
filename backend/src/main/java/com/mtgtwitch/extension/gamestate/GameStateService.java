@@ -28,6 +28,8 @@ public class GameStateService {
     private final Map<Long, PerGameState> games = new LinkedHashMap<>();
     private final GameStateBroadcaster gameStateBroadcaster;
     private Long activeGameId;
+    private int replayDepth;
+    private boolean replayBroadcastPending;
 
     public GameStateService(GameStateBroadcaster gameStateBroadcaster) {
         this.gameStateBroadcaster = gameStateBroadcaster;
@@ -50,7 +52,7 @@ public class GameStateService {
         evictOldGames(Instant.now());
 
         GameState gameState = snapshot();
-        gameStateBroadcaster.broadcast(gameState);
+        broadcastOrDefer(gameState);
         return gameState;
     }
 
@@ -78,7 +80,7 @@ public class GameStateService {
         evictOldGames(Instant.now());
 
         GameState gameState = snapshot();
-        gameStateBroadcaster.broadcast(gameState);
+        broadcastOrDefer(gameState);
         return gameState;
     }
 
@@ -113,7 +115,7 @@ public class GameStateService {
         evictOldGames(Instant.now());
 
         GameState gameState = snapshot();
-        gameStateBroadcaster.broadcast(gameState);
+        broadcastOrDefer(gameState);
         return gameState;
     }
 
@@ -126,7 +128,25 @@ public class GameStateService {
         evictOldGames(Instant.now());
 
         GameState gameState = snapshot();
-        gameStateBroadcaster.broadcast(gameState);
+        broadcastOrDefer(gameState);
+        return gameState;
+    }
+
+    public synchronized void beginReplay() {
+        replayDepth++;
+    }
+
+    public synchronized GameState endReplay() {
+        if (replayDepth == 0) {
+            return snapshot();
+        }
+
+        replayDepth--;
+        GameState gameState = snapshot();
+        if (replayDepth == 0 && replayBroadcastPending) {
+            replayBroadcastPending = false;
+            gameStateBroadcaster.broadcast(gameState);
+        }
         return gameState;
     }
 
@@ -288,6 +308,15 @@ public class GameStateService {
         state.detectionRegions = state.detectionRegions.stream()
                 .filter(region -> region.expiresAt() != null && region.expiresAt().isAfter(now))
                 .toList();
+    }
+
+    private void broadcastOrDefer(GameState gameState) {
+        if (replayDepth > 0) {
+            replayBroadcastPending = true;
+            return;
+        }
+
+        gameStateBroadcaster.broadcast(gameState);
     }
 
     private static class PerGameState {
