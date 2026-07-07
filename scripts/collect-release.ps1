@@ -41,24 +41,26 @@ if (Test-Path $zipPath) {
     Write-Host "Copied Twitch upload zip."
 }
 
-# Newest bridge installer exe from known locations.
-$exeCandidates = @(
-    Get-ChildItem -Path (Join-Path $repoRoot "backend\dist\windows-package") -Filter "*.exe" -ErrorAction SilentlyContinue | Where-Object { $_.Length -gt 50MB }
-    Get-ChildItem -Path (Join-Path $env:USERPROFILE "Desktop") -Filter "MTGO Twitch Bridge*.exe" -ErrorAction SilentlyContinue
-) | Where-Object { $_ } | Sort-Object LastWriteTime -Descending
-
-if ($exeCandidates.Count -gt 0) {
-    Copy-Item $exeCandidates[0].FullName (Join-Path $OutputDir $exeCandidates[0].Name) -Force
-    Write-Host ("Copied bridge installer: " + $exeCandidates[0].Name)
+# Bridge: package the freshest app-image build (backend\dist\windows-package) as a
+# versioned portable zip. The app-image's cfg carries the authoritative version.
+$appImage = Join-Path $repoRoot "backend\dist\windows-package\MTGO Twitch Bridge"
+if (Test-Path $appImage) {
+    $cfg = Get-Content (Join-Path $appImage "app\MTGO Twitch Bridge.cfg") -ErrorAction SilentlyContinue
+    $bridgeVersion = ($cfg | Select-String "app-version=(.+)$").Matches.Groups[1].Value
+    if (-not $bridgeVersion) { $bridgeVersion = "unknown" }
+    $bridgeZip = Join-Path $OutputDir ("MTGO-Twitch-Bridge-" + $bridgeVersion + "-portable.zip")
+    Push-Location (Split-Path $appImage)
+    & "$env:WINDIR\System32\tar.exe" -a -cf $bridgeZip "MTGO Twitch Bridge"
+    Pop-Location
+    Write-Host ("Packaged bridge portable zip (v" + $bridgeVersion + ").")
 } else {
-    Write-Warning "No bridge installer exe found. Build one with backend\package-windows.ps1 -Type exe"
+    Write-Warning "No bridge app-image found. Build one with backend\package-windows.ps1 -Type app-image"
 }
 
-$portableZip = Join-Path $env:USERPROFILE "Desktop\MTGO-Twitch-Bridge-portable.zip"
-if (Test-Path $portableZip) {
-    Copy-Item $portableZip (Join-Path $OutputDir "MTGO-Twitch-Bridge-portable.zip") -Force
-    Write-Host "Copied portable bridge zip."
-}
+# Signed installer exes (when we have them) also ride along if present in backend dist.
+Get-ChildItem -Path (Join-Path $repoRoot "backend\dist\windows-package") -Filter "*.exe" -ErrorAction SilentlyContinue |
+    Where-Object { $_.Length -gt 50MB } |
+    ForEach-Object { Copy-Item $_.FullName (Join-Path $OutputDir $_.Name) -Force; Write-Host ("Copied installer: " + $_.Name) }
 
 @"
 MTGTwitch Release folder  (generated $stamp)
