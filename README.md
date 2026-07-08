@@ -13,7 +13,10 @@ magiccontent is a Twitch video overlay for Magic: The Gathering Online. It watch
 ### Setup
 
 1. Install the bridge
-   Download `MTGO Twitch Bridge-x.x.x.exe` and run it.
+   Download the latest `MTGO-Twitch-Bridge-x.x.x-portable.zip` from the
+   [Releases page](https://github.com/xerioc2/MTGTwitchExtension/releases),
+   unzip it anywhere, and run `MTGO Twitch Bridge.exe` inside the folder.
+   (Windows SmartScreen may warn on first run: click "More info", then "Run anyway".)
 
 2. Login with Twitch
    Click `Login with Twitch` in the bridge window and complete the Twitch login in your browser.
