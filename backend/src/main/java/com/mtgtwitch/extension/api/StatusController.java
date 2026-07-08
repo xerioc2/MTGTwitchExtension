@@ -11,6 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 @CrossOrigin(origins = "*")
 public class StatusController {
 
+    public static final String APP_ID = "mtgo-twitch-bridge";
     private static final int DEFAULT_PORT = 8080;
 
     private final Environment environment;
@@ -23,7 +24,7 @@ public class StatusController {
     public BridgeStatus status() {
         String localPort = environment.getProperty("local.server.port");
         String configuredPort = environment.getProperty("server.port");
-        return new BridgeStatus(parsePort(localPort, parsePort(configuredPort, DEFAULT_PORT)));
+        return new BridgeStatus(APP_ID, parsePort(localPort, parsePort(configuredPort, DEFAULT_PORT)));
     }
 
     private int parsePort(String value, int fallback) {
@@ -38,6 +39,6 @@ public class StatusController {
         }
     }
 
-    public record BridgeStatus(int port) {
+    public record BridgeStatus(String app, int port) {
     }
 }

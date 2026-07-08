@@ -20,7 +20,11 @@ import java.nio.file.StandardWatchEventKinds;
 import java.nio.file.WatchEvent;
 import java.nio.file.WatchKey;
 import java.nio.file.WatchService;
+import java.time.Duration;
+import java.time.Instant;
 import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -36,6 +40,8 @@ public class MtgoLogWatcherService {
 
     private final boolean rawLogDebugEnabled;
     private final long backfillBytes;
+    private final Duration rediscoveryInterval;
+    private final Duration rediscoveryHysteresis;
     private final MtgoLogDiscoveryService mtgoLogDiscoveryService;
     private final MtgoLogParserService mtgoLogParserService;
     private final ExecutorService executorService;
@@ -45,17 +51,26 @@ public class MtgoLogWatcherService {
     private WatchService watchService;
     private Future<?> watcherTask;
     private ScheduledFuture<?> pollingTask;
+    private ScheduledFuture<?> rediscoveryTask;
     private Path logPath;
     private long lastKnownPosition;
 
     public MtgoLogWatcherService(
             @Value("${mtgo.debug.raw-log:false}") boolean rawLogDebugEnabled,
             @Value("${mtgo.log.backfill-bytes:5242880}") long backfillBytes,
+            @Value("${mtgo.log.rediscovery-interval:PT30S}") Duration rediscoveryInterval,
+            @Value("${mtgo.log.rediscovery-hysteresis:PT10S}") Duration rediscoveryHysteresis,
             MtgoLogDiscoveryService mtgoLogDiscoveryService,
             MtgoLogParserService mtgoLogParserService
     ) {
         this.rawLogDebugEnabled = rawLogDebugEnabled;
         this.backfillBytes = Math.max(0, backfillBytes);
+        this.rediscoveryInterval = rediscoveryInterval.isNegative() || rediscoveryInterval.isZero()
+                ? Duration.ofSeconds(30)
+                : rediscoveryInterval;
+        this.rediscoveryHysteresis = rediscoveryHysteresis.isNegative()
+                ? Duration.ZERO
+                : rediscoveryHysteresis;
         this.mtgoLogDiscoveryService = mtgoLogDiscoveryService;
         this.mtgoLogParserService = mtgoLogParserService;
         this.executorService = Executors.newSingleThreadExecutor(runnable -> {
@@ -137,6 +152,13 @@ public class MtgoLogWatcherService {
                     () -> readNewLines(activeLogPath),
                     2,
                     2,
+                    TimeUnit.SECONDS
+            );
+            long rediscoveryIntervalSeconds = Math.max(1, this.rediscoveryInterval.toSeconds());
+            rediscoveryTask = pollingExecutorService.scheduleAtFixedRate(
+                    this::rediscoverActiveLog,
+                    rediscoveryIntervalSeconds,
+                    rediscoveryIntervalSeconds,
                     TimeUnit.SECONDS
             );
 
@@ -243,9 +265,72 @@ public class MtgoLogWatcherService {
             activePollingTask.cancel(true);
         }
 
+        ScheduledFuture<?> activeRediscoveryTask = rediscoveryTask;
+        if (activeRediscoveryTask != null) {
+            activeRediscoveryTask.cancel(true);
+        }
+
         watchService = null;
         watcherTask = null;
         pollingTask = null;
+        rediscoveryTask = null;
+    }
+
+    private synchronized void rediscoverActiveLog() {
+        if (!running || logPath == null) {
+            return;
+        }
+
+        List<MtgoLogDiscoveryService.LogCandidate> candidates = mtgoLogDiscoveryService.listCandidates();
+        Optional<Path> switchTarget = selectRediscoveryTarget(candidates, logPath, rediscoveryHysteresis);
+        if (switchTarget.isEmpty()) {
+            return;
+        }
+
+        Path oldLogPath = logPath;
+        Path newLogPath = switchTarget.get().toAbsolutePath().normalize();
+        if (oldLogPath.equals(newLogPath)) {
+            return;
+        }
+
+        log.info("Switching MTGO log watcher to newer active log: old={}, new={}", oldLogPath, newLogPath);
+        stopCurrentWatcher();
+        startWatching(newLogPath);
+    }
+
+    static Optional<Path> selectRediscoveryTarget(
+            List<MtgoLogDiscoveryService.LogCandidate> candidates,
+            Path currentPath,
+            Duration hysteresis
+    ) {
+        if (candidates.isEmpty() || currentPath == null) {
+            return Optional.empty();
+        }
+
+        Path normalizedCurrentPath = currentPath.toAbsolutePath().normalize();
+        MtgoLogDiscoveryService.LogCandidate newest = candidates.stream()
+                .max(java.util.Comparator.comparing(MtgoLogDiscoveryService.LogCandidate::lastModified))
+                .orElse(null);
+        if (newest == null) {
+            return Optional.empty();
+        }
+
+        Path newestPath = newest.path().toAbsolutePath().normalize();
+        if (newestPath.equals(normalizedCurrentPath)) {
+            return Optional.empty();
+        }
+
+        Instant currentLastModified = candidates.stream()
+                .filter(candidate -> candidate.path().toAbsolutePath().normalize().equals(normalizedCurrentPath))
+                .map(MtgoLogDiscoveryService.LogCandidate::lastModified)
+                .findFirst()
+                .map(fileTime -> fileTime.toInstant())
+                .orElse(Instant.EPOCH);
+        Instant switchThreshold = currentLastModified.plus(hysteresis);
+
+        return newest.lastModified().toInstant().isAfter(switchThreshold)
+                ? Optional.of(newestPath)
+                : Optional.empty();
     }
 
     private void watchForChanges(WatchService activeWatchService, Path activeLogPath) {

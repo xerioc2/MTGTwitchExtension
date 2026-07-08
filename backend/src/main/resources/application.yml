@@ -15,6 +15,8 @@ mtgo:
   log:
     path: ${MTGO_LOG_PATH:}
     backfill-bytes: ${MTGO_LOG_BACKFILL_BYTES:5242880}
+    rediscovery-interval: ${MTGO_LOG_REDISCOVERY_INTERVAL:PT30S}
+    rediscovery-hysteresis: ${MTGO_LOG_REDISCOVERY_HYSTERESIS:PT10S}
   debug:
     raw-log: ${MTGO_DEBUG_RAW_LOG:false}
 

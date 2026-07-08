@@ -36,16 +36,22 @@ public class MtgoLogDiscoveryService {
     }
 
     public Optional<Path> resolveLogPath() {
+        return listCandidates().stream()
+                .max(Comparator.comparing(LogCandidate::lastModified))
+                .map(LogCandidate::path);
+    }
+
+    public List<LogCandidate> listCandidates() {
         if (StringUtils.hasText(configuredLogPath)) {
             Path configuredPath = Path.of(configuredLogPath).toAbsolutePath().normalize();
             log.info("Using MTGO_LOG_PATH from configuration: {}", configuredPath);
-            return Optional.of(configuredPath);
+            return List.of(new LogCandidate(configuredPath, lastModifiedTimeSafe(configuredPath)));
         }
 
         Path resolvedSearchRoot = searchRoot != null ? searchRoot : localAppDataAppsRoot();
         if (!Files.isDirectory(resolvedSearchRoot)) {
             log.error("MTGO_LOG_PATH is not configured and MTGO Apps root does not exist: {}", resolvedSearchRoot);
-            return Optional.empty();
+            return List.of();
         }
 
         try (Stream<Path> candidates = Files.find(resolvedSearchRoot, MAX_LOG_PARENT_SCAN_DEPTH + 1, this::isMtgoLogCandidate)) {
@@ -69,10 +75,10 @@ public class MtgoLogDiscoveryService {
                 log.error("No MTGO log file found under {} within directory depth {}.", resolvedSearchRoot, MAX_LOG_PARENT_SCAN_DEPTH);
             }
 
-            return resolvedPath;
+            return logCandidates;
         } catch (IOException exception) {
             log.error("Failed while scanning for MTGO log files under {}.", resolvedSearchRoot, exception);
-            return Optional.empty();
+            return List.of();
         }
     }
 
@@ -110,6 +116,6 @@ public class MtgoLogDiscoveryService {
         }
     }
 
-    private record LogCandidate(Path path, FileTime lastModified) {
+    public record LogCandidate(Path path, FileTime lastModified) {
     }
 }

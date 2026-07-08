@@ -25,6 +25,7 @@ import java.awt.Desktop;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.GraphicsEnvironment;
 import java.awt.Graphics2D;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
@@ -71,6 +72,7 @@ public class MtgoBridgeLauncher {
     private static final String WINDOW_TITLE = "MTGO Twitch Bridge";
     private static final String APP_ICON_RESOURCE = "/icons/bridge-icon.png";
     private static final String MESSAGE = "Open MTGO first, then start the bridge. If MTGO updates or the log is not found, click Refresh Log.";
+    private static final String ALREADY_RUNNING_MESSAGE = "MTGO Twitch Bridge is already running — check your system tray.";
     private static final int DEFAULT_PORT = 8080;
     private static final int MAX_PORT = 8090;
     private static final int TWITCH_CALLBACK_PORT = 8787;
@@ -120,22 +122,21 @@ public class MtgoBridgeLauncher {
     }
 
     private void start(String[] args) {
-        bridgeConfig = loadBridgeConfig().orElse(null);
-        appIconImage = loadAppIcon();
-
-        Optional<Integer> availablePort = findAvailablePort();
-        if (availablePort.isEmpty()) {
-            JOptionPane.showMessageDialog(
-                    null,
-                    "No available ports found between 8080-8090. Please close other applications and try again.",
-                    WINDOW_TITLE,
-                    JOptionPane.ERROR_MESSAGE
-            );
+        BridgeInstanceGuard.ScanResult portScan = scanServerPorts(args);
+        if (portScan.status() == BridgeInstanceGuard.ScanStatus.BRIDGE_RUNNING) {
+            reportAlreadyRunning(portScan.port().orElse(DEFAULT_PORT));
+            System.exit(1);
+            return;
+        }
+        if (portScan.status() == BridgeInstanceGuard.ScanStatus.NONE_AVAILABLE || portScan.port().isEmpty()) {
+            reportNoAvailablePorts();
             System.exit(0);
             return;
         }
 
-        serverPort = availablePort.get();
+        bridgeConfig = loadBridgeConfig().orElse(null);
+        appIconImage = loadAppIcon();
+        serverPort = portScan.port().getAsInt();
         websocketUrl = websocketUrl(serverPort);
 
         createWindow();
@@ -144,6 +145,43 @@ public class MtgoBridgeLauncher {
         updateAuthUi();
         frame.setVisible(true);
         startSpringBoot(withServerPort(args, serverPort));
+    }
+
+    private BridgeInstanceGuard.ScanResult scanServerPorts(String[] args) {
+        Optional<Integer> configuredPort = configuredServerPort(args);
+        return configuredPort
+                .map(port -> BridgeInstanceGuard.scanPorts(port, port))
+                .orElseGet(() -> BridgeInstanceGuard.scanPorts(DEFAULT_PORT, MAX_PORT));
+    }
+
+    private void reportAlreadyRunning(int port) {
+        String message = ALREADY_RUNNING_MESSAGE + "\n\nPort " + port + " is already in use.";
+        if (GraphicsEnvironment.isHeadless()) {
+            System.err.println("ERROR: " + message.replace('\n', ' '));
+            return;
+        }
+
+        JOptionPane.showMessageDialog(
+                null,
+                message,
+                WINDOW_TITLE,
+                JOptionPane.ERROR_MESSAGE
+        );
+    }
+
+    private void reportNoAvailablePorts() {
+        String message = "No available ports found between 8080-8090. Please close other applications and try again.";
+        if (GraphicsEnvironment.isHeadless()) {
+            System.err.println("ERROR: " + message);
+            return;
+        }
+
+        JOptionPane.showMessageDialog(
+                null,
+                message,
+                WINDOW_TITLE,
+                JOptionPane.ERROR_MESSAGE
+        );
     }
 
     private void createWindow() {
@@ -714,16 +752,6 @@ public class MtgoBridgeLauncher {
         websocketUrl = websocketUrl(serverPort);
     }
 
-    private Optional<Integer> findAvailablePort() {
-        for (int port = DEFAULT_PORT; port <= MAX_PORT; port++) {
-            if (!isPortBound(port)) {
-                return Optional.of(port);
-            }
-        }
-
-        return Optional.empty();
-    }
-
     private String[] withServerPort(String[] args, int port) {
         String[] filteredArgs = java.util.Arrays.stream(args)
                 .filter(arg -> !arg.startsWith("--server.port="))
@@ -731,6 +759,15 @@ public class MtgoBridgeLauncher {
         String[] result = java.util.Arrays.copyOf(filteredArgs, filteredArgs.length + 1);
         result[filteredArgs.length] = "--server.port=" + port;
         return result;
+    }
+
+    private Optional<Integer> configuredServerPort(String[] args) {
+        return java.util.Arrays.stream(args)
+                .filter(arg -> arg.startsWith("--server.port="))
+                .map(arg -> arg.substring("--server.port=".length()))
+                .map(this::parsePort)
+                .flatMap(Optional::stream)
+                .findFirst();
     }
 
     private Optional<Integer> parsePort(String value) {

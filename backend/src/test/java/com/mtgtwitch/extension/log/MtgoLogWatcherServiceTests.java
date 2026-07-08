@@ -10,9 +10,13 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 import java.lang.reflect.Method;
+import java.nio.file.attribute.FileTime;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.time.Duration;
+import java.time.Instant;
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -72,6 +76,56 @@ class MtgoLogWatcherServiceTests {
         harness.watcher.stop();
     }
 
+    @Test
+    void rediscoverySelectorSwitchesOnlyWhenNewestCandidateClearsHysteresis() {
+        Path current = tempDir.resolve("current").resolve("Logs").resolve("mtgo.log");
+        Path newer = tempDir.resolve("newer").resolve("Logs").resolve("mtgo.log");
+        Instant currentMtime = Instant.parse("2026-07-07T12:00:00Z");
+
+        assertThat(MtgoLogWatcherService.selectRediscoveryTarget(
+                List.of(
+                        new MtgoLogDiscoveryService.LogCandidate(current, FileTime.from(currentMtime)),
+                        new MtgoLogDiscoveryService.LogCandidate(newer, FileTime.from(currentMtime.plusSeconds(9)))
+                ),
+                current,
+                Duration.ofSeconds(10)
+        )).isEmpty();
+
+        assertThat(MtgoLogWatcherService.selectRediscoveryTarget(
+                List.of(
+                        new MtgoLogDiscoveryService.LogCandidate(current, FileTime.from(currentMtime)),
+                        new MtgoLogDiscoveryService.LogCandidate(newer, FileTime.from(currentMtime.plusSeconds(11)))
+                ),
+                current,
+                Duration.ofSeconds(10)
+        )).contains(newer.toAbsolutePath().normalize());
+    }
+
+    @Test
+    void rediscoverySwitchesWatcherToNewerLogAndBackfillsNewFile() throws Exception {
+        Path oldLog = tempDir.resolve("old-version").resolve("Logs").resolve("mtgo.log");
+        Path newLog = tempDir.resolve("new-version").resolve("Logs").resolve("mtgo.log");
+        Files.createDirectories(oldLog.getParent());
+        Files.createDirectories(newLog.getParent());
+        Files.writeString(oldLog, deckLine(950571148L) + "\n" + statusLine(950571148L, 287056035L, 78632) + "\n");
+        Files.writeString(newLog, deckLine(950571149L) + "\n" + statusLine(950571149L, 287056036L, 90565) + "\n");
+        Files.setLastModifiedTime(oldLog, FileTime.from(Instant.parse("2026-07-07T12:00:00Z")));
+        Files.setLastModifiedTime(newLog, FileTime.from(Instant.parse("2026-07-07T11:59:00Z")));
+
+        Harness harness = new Harness(new MtgoLogDiscoveryService("", tempDir), 5 * 1024 * 1024);
+        harness.watcher.rescan();
+        assertThat(harness.gameStateService.snapshot().gameId()).isEqualTo(950571148L);
+
+        Files.setLastModifiedTime(newLog, FileTime.from(Instant.parse("2026-07-07T12:00:20Z")));
+        invokeRediscoverActiveLog(harness.watcher);
+
+        GameState gameState = harness.gameStateService.snapshot();
+        assertThat(gameState.gameId()).isEqualTo(950571149L);
+        assertThat(gameState.handCards()).extracting(GameCard::catalogId).containsExactly(90565);
+
+        harness.watcher.stop();
+    }
+
     private Path writeLog(String... lines) throws Exception {
         Path logPath = tempDir.resolve("mtgo.log");
         Files.writeString(logPath, String.join("\n", lines) + "\n");
@@ -82,6 +136,12 @@ class MtgoLogWatcherServiceTests {
         Method method = MtgoLogWatcherService.class.getDeclaredMethod("readNewLines", Path.class);
         method.setAccessible(true);
         method.invoke(watcher, logPath);
+    }
+
+    private void invokeRediscoverActiveLog(MtgoLogWatcherService watcher) throws Exception {
+        Method method = MtgoLogWatcherService.class.getDeclaredMethod("rediscoverActiveLog");
+        method.setAccessible(true);
+        method.invoke(watcher);
     }
 
     private String deckLine(long gameId) {
@@ -100,6 +160,10 @@ class MtgoLogWatcherServiceTests {
         private final MtgoLogWatcherService watcher;
 
         private Harness(Path logPath, long backfillBytes) {
+            this(new MtgoLogDiscoveryService(logPath.toString(), null), backfillBytes);
+        }
+
+        private Harness(MtgoLogDiscoveryService discoveryService, long backfillBytes) {
             ObjectMapper objectMapper = new ObjectMapper().findAndRegisterModules();
             broadcaster = new CountingBroadcaster(objectMapper);
             gameStateService = new GameStateService(broadcaster);
@@ -107,7 +171,9 @@ class MtgoLogWatcherServiceTests {
             watcher = new MtgoLogWatcherService(
                     false,
                     backfillBytes,
-                    new MtgoLogDiscoveryService(logPath.toString(), null),
+                    Duration.ofMinutes(5),
+                    Duration.ofSeconds(10),
+                    discoveryService,
                     parser
             );
         }
