@@ -28,6 +28,7 @@ public class GameStateService {
     private final Map<Long, PerGameState> games = new LinkedHashMap<>();
     private final GameStateBroadcaster gameStateBroadcaster;
     private Long activeGameId;
+    private Long focusedGameId;
     private int replayDepth;
     private boolean replayBroadcastPending;
 
@@ -58,13 +59,13 @@ public class GameStateService {
 
     public synchronized GameState apply(GameStatusEvent event) {
         PerGameState state = stateForStatusEvent(event);
-        activeGameId = event.gameId();
         state.gameId = event.gameId();
         state.matchId = event.matchId();
         state.players = List.copyOf(event.players());
         state.markUpdated(Instant.now());
 
         evictFinishedGameFromSameMatch(state);
+        activateGameForEvent(event.gameId());
         clearTrackedZones(state);
 
         int localPlayerId = resolveLocalPlayerId(state);
@@ -86,7 +87,6 @@ public class GameStateService {
 
     public synchronized GameState updateDeckCatalogIds(DeckCatalogEvent event) {
         PerGameState state = stateForGame(event.gameId());
-        activeGameId = event.gameId();
         state.gameId = event.gameId();
         state.localPlayerName = event.username();
         state.deckCards = List.copyOf(event.deckCards());
@@ -112,8 +112,22 @@ public class GameStateService {
                 state.deckCatalogIds.size()
         );
 
+        activateGameForEvent(event.gameId());
         evictOldGames(Instant.now());
 
+        GameState gameState = snapshot();
+        broadcastOrDefer(gameState);
+        return gameState;
+    }
+
+    public synchronized GameState focusGame(long gameId) {
+        focusedGameId = gameId;
+        if (!games.containsKey(gameId)) {
+            log.debug("Recorded MTGO focused game {} before game state was cached.", gameId);
+            return snapshot();
+        }
+
+        activeGameId = gameId;
         GameState gameState = snapshot();
         broadcastOrDefer(gameState);
         return gameState;
@@ -178,6 +192,7 @@ public class GameStateService {
     }
 
     private PerGameState activeState() {
+        ensureActiveGamePresent();
         return stateForGame(activeGameId);
     }
 
@@ -203,32 +218,34 @@ public class GameStateService {
         return state;
     }
 
-    private void evictFinishedGameFromSameMatch(PerGameState activeState) {
-        if (activeState.gameId == null || activeState.matchId == null) {
+    private void evictFinishedGameFromSameMatch(PerGameState nextState) {
+        if (nextState.gameId == null || nextState.matchId == null) {
             return;
         }
 
-        games.entrySet().removeIf(entry -> {
-            PerGameState state = entry.getValue();
-            return state.gameId != null
-                    && !state.gameId.equals(activeState.gameId)
-                    && activeState.matchId.equals(state.matchId);
-        });
+        games.entrySet().stream()
+                .filter(entry -> {
+                    PerGameState state = entry.getValue();
+                    return state.gameId != null
+                            && !state.gameId.equals(nextState.gameId)
+                            && nextState.matchId.equals(state.matchId);
+                })
+                .map(Map.Entry::getKey)
+                .toList()
+                .forEach(this::removeCachedGame);
     }
 
     private void evictOldGames(Instant now) {
-        games.entrySet().removeIf(entry -> {
-            if (Objects.equals(entry.getKey(), activeGameId)) {
-                return false;
-            }
-            PerGameState state = entry.getValue();
-            return !Objects.equals(entry.getKey(), activeGameId)
-                    && state.lastUpdatedAt.plus(STALE_GAME_TTL).isBefore(now);
-        });
+        games.entrySet().stream()
+                .filter(entry -> !isProtectedGame(entry.getKey()))
+                .filter(entry -> entry.getValue().lastUpdatedAt.plus(STALE_GAME_TTL).isBefore(now))
+                .map(Map.Entry::getKey)
+                .toList()
+                .forEach(this::removeCachedGame);
 
         while (games.size() > MAX_CACHED_GAMES) {
             Long oldestGameId = games.entrySet().stream()
-                    .filter(entry -> !Objects.equals(entry.getKey(), activeGameId))
+                    .filter(entry -> !isProtectedGame(entry.getKey()))
                     .min(Comparator.comparing(entry -> entry.getValue().lastUpdatedAt))
                     .map(Map.Entry::getKey)
                     .orElse(null);
@@ -237,8 +254,53 @@ public class GameStateService {
                 return;
             }
 
-            games.remove(oldestGameId);
+            removeCachedGame(oldestGameId);
         }
+
+        ensureActiveGamePresent();
+    }
+
+    private void activateGameForEvent(Long gameId) {
+        if (Objects.equals(focusedGameId, gameId)) {
+            activeGameId = gameId;
+            return;
+        }
+
+        if (focusedGameId == null) {
+            activeGameId = gameId;
+        }
+    }
+
+    private boolean isProtectedGame(Long gameId) {
+        return Objects.equals(gameId, activeGameId) || Objects.equals(gameId, focusedGameId);
+    }
+
+    private void removeCachedGame(Long gameId) {
+        games.remove(gameId);
+        if (Objects.equals(activeGameId, gameId)) {
+            activeGameId = null;
+        }
+        if (Objects.equals(focusedGameId, gameId)) {
+            focusedGameId = null;
+        }
+    }
+
+    private void ensureActiveGamePresent() {
+        if (activeGameId != null && games.containsKey(activeGameId)) {
+            return;
+        }
+
+        if (focusedGameId != null) {
+            if (games.containsKey(focusedGameId)) {
+                activeGameId = focusedGameId;
+            }
+            return;
+        }
+
+        activeGameId = games.entrySet().stream()
+                .max(Comparator.comparing(entry -> entry.getValue().lastUpdatedAt))
+                .map(Map.Entry::getKey)
+                .orElse(null);
     }
 
     private void removeFromTrackedZones(PerGameState state, String cardName, Zone destinationZone) {

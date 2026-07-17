@@ -126,6 +126,28 @@ class MtgoLogWatcherServiceTests {
         harness.watcher.stop();
     }
 
+    @Test
+    void focusedLogSwitchBypassesHysteresisAndBackfillsNewFile() throws Exception {
+        Path oldLog = tempDir.resolve("old-version").resolve("Logs").resolve("mtgo.log");
+        Path focusedLog = tempDir.resolve("focused-version").resolve("Logs").resolve("mtgo.log");
+        Files.createDirectories(oldLog.getParent());
+        Files.createDirectories(focusedLog.getParent());
+        Files.writeString(oldLog, deckLine(950571148L) + "\n" + statusLine(950571148L, 287056035L, 78632) + "\n");
+        Files.writeString(focusedLog, deckLine(950571149L) + "\n" + statusLine(950571149L, 287056036L, 90565) + "\n");
+
+        Harness harness = new Harness(oldLog, 5 * 1024 * 1024);
+        harness.watcher.rescan();
+        assertThat(harness.gameStateService.snapshot().gameId()).isEqualTo(950571148L);
+
+        assertThat(harness.watcher.switchToFocusedLog(focusedLog)).isPresent();
+
+        GameState gameState = harness.gameStateService.snapshot();
+        assertThat(gameState.gameId()).isEqualTo(950571149L);
+        assertThat(gameState.handCards()).extracting(GameCard::catalogId).containsExactly(90565);
+
+        harness.watcher.stop();
+    }
+
     private Path writeLog(String... lines) throws Exception {
         Path logPath = tempDir.resolve("mtgo.log");
         Files.writeString(logPath, String.join("\n", lines) + "\n");

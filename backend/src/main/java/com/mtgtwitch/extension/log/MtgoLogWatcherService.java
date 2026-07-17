@@ -98,6 +98,21 @@ public class MtgoLogWatcherService {
                 .orElseGet(() -> new LogWatchStatus(null, false, "No MTGO log file was found."));
     }
 
+    public synchronized Optional<LogWatchStatus> switchToFocusedLog(Path focusedLogPath) {
+        if (focusedLogPath == null) {
+            return Optional.empty();
+        }
+
+        Path normalizedLogPath = focusedLogPath.toAbsolutePath().normalize();
+        if (logPath != null && logPath.toAbsolutePath().normalize().equals(normalizedLogPath)) {
+            return Optional.empty();
+        }
+
+        log.info("Switching MTGO log watcher to focused MTGO process log: old={}, new={}", logPath, normalizedLogPath);
+        stopCurrentWatcher();
+        return Optional.of(startWatching(normalizedLogPath));
+    }
+
     @PreDestroy
     public synchronized void stop() {
         stopCurrentWatcher();

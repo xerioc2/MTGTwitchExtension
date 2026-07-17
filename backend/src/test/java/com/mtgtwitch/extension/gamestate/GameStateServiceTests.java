@@ -97,6 +97,58 @@ class GameStateServiceTests {
         assertThat(oldGame.deckCards()).containsExactly(new DeckCard(900001, 4, false));
     }
 
+    @Test
+    void focusGameSwitchesCachedGameAndBroadcasts() {
+        CountingBroadcaster broadcaster = new CountingBroadcaster(new ObjectMapper().findAndRegisterModules());
+        GameStateService focusedService = new GameStateService(broadcaster);
+        focusedService.apply(statusEvent(1001L, 2001L, 111001));
+        focusedService.apply(statusEvent(1002L, 2002L, 222001));
+        int broadcastCountBeforeFocus = broadcaster.broadcastCount();
+
+        GameState focused = focusedService.focusGame(1001L);
+
+        assertThat(focused.gameId()).isEqualTo(1001L);
+        assertThat(focused.handCards()).extracting(GameCard::catalogId).containsExactly(111001);
+        assertThat(broadcaster.broadcastCount()).isEqualTo(broadcastCountBeforeFocus + 1);
+    }
+
+    @Test
+    void uncachedFocusBecomesActiveWhenThatGameArrives() {
+        gameStateService.apply(statusEvent(1001L, 2001L, 111001));
+
+        gameStateService.focusGame(1002L);
+        GameState stillActiveA = gameStateService.apply(statusEvent(1001L, 2001L, 111002));
+        assertThat(stillActiveA.gameId()).isEqualTo(1001L);
+        assertThat(stillActiveA.handCards()).extracting(GameCard::catalogId).containsExactly(111002);
+
+        GameState focusedB = gameStateService.apply(statusEvent(1002L, 2002L, 222001));
+        assertThat(focusedB.gameId()).isEqualTo(1002L);
+        assertThat(focusedB.handCards()).extracting(GameCard::catalogId).containsExactly(222001);
+    }
+
+    @Test
+    void mostRecentEmitterDoesNotStealActiveGameFromCachedFocus() {
+        gameStateService.apply(statusEvent(1001L, 2001L, 111001));
+        gameStateService.apply(statusEvent(1002L, 2002L, 222001));
+        gameStateService.focusGame(1001L);
+
+        GameState stillFocusedA = gameStateService.apply(statusEvent(1002L, 2002L, 222002));
+
+        assertThat(stillFocusedA.gameId()).isEqualTo(1001L);
+        assertThat(stillFocusedA.handCards()).extracting(GameCard::catalogId).containsExactly(111001);
+    }
+
+    @Test
+    void sameMatchSuccessionEvictsFocusedOldGameAndFallsBackToEmitter() {
+        gameStateService.apply(statusEvent(1001L, 2001L, 111001));
+        gameStateService.focusGame(1001L);
+
+        GameState gameTwo = gameStateService.apply(statusEvent(1002L, 2001L, 222001));
+
+        assertThat(gameTwo.gameId()).isEqualTo(1002L);
+        assertThat(gameTwo.handCards()).extracting(GameCard::catalogId).containsExactly(222001);
+    }
+
     private GameStatusEvent statusEvent(long gameId, long matchId, int localHandCatalogId) {
         return new GameStatusEvent(
                 gameId,
@@ -112,5 +164,23 @@ class GameStateServiceTests {
                 ),
                 "raw"
         );
+    }
+
+    private static class CountingBroadcaster extends GameStateBroadcaster {
+        private int broadcastCount;
+
+        private CountingBroadcaster(ObjectMapper objectMapper) {
+            super(objectMapper);
+        }
+
+        @Override
+        public void broadcast(GameState gameState) {
+            broadcastCount++;
+            super.broadcast(gameState);
+        }
+
+        private int broadcastCount() {
+            return broadcastCount;
+        }
     }
 }

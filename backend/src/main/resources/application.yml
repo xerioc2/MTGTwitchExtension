@@ -12,6 +12,9 @@ management:
         include: health,info
 
 mtgo:
+  focus:
+    enabled: ${MTGO_FOCUS_ENABLED:true}
+    poll-interval: ${MTGO_FOCUS_POLL_INTERVAL:PT0.75S}
   log:
     path: ${MTGO_LOG_PATH:}
     backfill-bytes: ${MTGO_LOG_BACKFILL_BYTES:5242880}
