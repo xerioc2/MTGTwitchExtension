@@ -1458,21 +1458,69 @@ async function fetchCardDetailsFromBackendOrScryfall(catalogId) {
 }
 
 async function fetchCardDetailsFromScryfall(catalogId) {
-  const card = await fetchScryfallCard(`https://api.scryfall.com/cards/mtgo/${catalogId}`)
-    ?? await fetchScryfallCard(`https://api.scryfall.com/cards/multiverse/${catalogId}`);
-
-  if (!card) {
-    throw new Error(`Card ${catalogId} was not found.`);
+  const card = await fetchScryfallCard(`https://api.scryfall.com/cards/mtgo/${catalogId}`);
+  if (card) {
+    return mapScryfallCard(catalogId, card, false);
   }
 
+  const inferredBackFace = await inferScryfallBackFace(catalogId);
+  if (inferredBackFace) {
+    return inferredBackFace;
+  }
+
+  throw new Error(`Card ${catalogId} was not found.`);
+}
+
+function mapScryfallCard(catalogId, card, inferredBackFace) {
   return {
     catalogId,
     name: card.name,
     typeLine: card.type_line,
     manaCost: card.mana_cost,
     oracleText: card.oracle_text,
-    imageUrl: card.image_uris?.normal
+    imageUrl: card.image_uris?.normal || card.card_faces?.[0]?.image_uris?.normal,
+    inferredBackFace
   };
+}
+
+async function inferScryfallBackFace(catalogId) {
+  for (const offset of [1, 2]) {
+    const neighborCatalogId = catalogId - offset;
+    if (neighborCatalogId <= 0) {
+      continue;
+    }
+
+    const neighborCard = await fetchScryfallCard(`https://api.scryfall.com/cards/mtgo/${neighborCatalogId}`);
+    if (!neighborCard) {
+      continue;
+    }
+
+    if (!isDoubleFacedLayout(neighborCard.layout)) {
+      return null;
+    }
+
+    const backFace = neighborCard.card_faces?.[1];
+    if (!backFace) {
+      return null;
+    }
+
+    return {
+      catalogId,
+      name: backFace.name,
+      typeLine: backFace.type_line,
+      manaCost: backFace.mana_cost,
+      oracleText: backFace.oracle_text,
+      imageUrl: backFace.image_uris?.normal || neighborCard.image_uris?.normal,
+      inferredBackFace: true
+    };
+  }
+
+  return null;
+}
+
+function isDoubleFacedLayout(layout) {
+  const normalizedLayout = String(layout ?? '').toLowerCase();
+  return normalizedLayout === 'modal_dfc' || normalizedLayout === 'transform';
 }
 
 async function fetchScryfallCard(url) {

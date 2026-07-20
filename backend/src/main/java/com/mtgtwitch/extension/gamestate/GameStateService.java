@@ -351,6 +351,10 @@ public class GameStateService {
     }
 
     private void addStatusCard(PerGameState state, GameCard card) {
+        if (card.catalogId() <= 0) {
+            return;
+        }
+
         Zone.fromLogText(card.actualZone())
                 .filter(zone -> zone != Zone.EXILE || card.zone().equalsIgnoreCase("Exile"))
                 .ifPresent(zone -> {
@@ -360,6 +364,10 @@ public class GameStateService {
     }
 
     private void addOpponentStatusCard(PerGameState state, GameCard card) {
+        if (card.catalogId() <= 0) {
+            return;
+        }
+
         Zone.fromLogText(card.actualZone())
                 .filter(zone -> zone == Zone.BATTLEFIELD || zone == Zone.GRAVEYARD || zone == Zone.EXILE)
                 .filter(zone -> zone != Zone.EXILE || card.zone().equalsIgnoreCase("Exile"))

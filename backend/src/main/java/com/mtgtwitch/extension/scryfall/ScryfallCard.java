@@ -6,6 +6,7 @@ public record ScryfallCard(
         String typeLine,
         String manaCost,
         String oracleText,
-        String imageUrl
+        String imageUrl,
+        boolean inferredBackFace
 ) {
 }

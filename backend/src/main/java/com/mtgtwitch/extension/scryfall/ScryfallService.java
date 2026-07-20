@@ -20,7 +20,6 @@ import java.util.concurrent.ConcurrentHashMap;
 public class ScryfallService {
 
     private static final String SCRYFALL_MTGO_CARD_URL = "https://api.scryfall.com/cards/mtgo/{catalogId}";
-    private static final String SCRYFALL_MULTIVERSE_CARD_URL = "https://api.scryfall.com/cards/multiverse/{catalogId}";
 
     private final RestTemplate restTemplate;
     private final Duration requestDelay;
@@ -53,18 +52,42 @@ public class ScryfallService {
             return Optional.of(cachedCard);
         }
 
-        Optional<ScryfallCard> fetchedCard = fetchCardFromScryfall(catalogId, SCRYFALL_MTGO_CARD_URL)
-                .or(() -> fetchCardFromScryfall(catalogId, SCRYFALL_MULTIVERSE_CARD_URL));
+        Optional<ScryfallCard> fetchedCard = fetchApiCard(catalogId)
+                .map(apiCard -> toCard(catalogId, apiCard, false))
+                .or(() -> inferBackFace(catalogId));
         fetchedCard.ifPresent(card -> cache.put(catalogId, card));
         return fetchedCard;
     }
 
-    private Optional<ScryfallCard> fetchCardFromScryfall(int catalogId, String url) {
+    private Optional<ScryfallCard> inferBackFace(int catalogId) {
+        for (int offset = 1; offset <= 2; offset++) {
+            int neighborCatalogId = catalogId - offset;
+            if (neighborCatalogId <= 0) {
+                continue;
+            }
+
+            Optional<ScryfallApiCard> neighborCard = fetchApiCard(neighborCatalogId);
+            if (neighborCard.isEmpty()) {
+                continue;
+            }
+
+            ScryfallApiCard apiCard = neighborCard.get();
+            if (!isDoubleFacedLayout(apiCard.layout())) {
+                return Optional.empty();
+            }
+
+            return backFaceCard(catalogId, apiCard);
+        }
+
+        return Optional.empty();
+    }
+
+    private Optional<ScryfallApiCard> fetchApiCard(int catalogId) {
         throttleRequests();
 
         try {
             ScryfallApiCard apiCard = restTemplate.getForObject(
-                    url,
+                    SCRYFALL_MTGO_CARD_URL,
                     ScryfallApiCard.class,
                     catalogId
             );
@@ -73,19 +96,60 @@ public class ScryfallService {
                 return Optional.empty();
             }
 
-            return Optional.of(new ScryfallCard(
-                    catalogId,
-                    apiCard.name(),
-                    apiCard.typeLine(),
-                    apiCard.manaCost(),
-                    apiCard.oracleText(),
-                    apiCard.imageUris() == null ? null : apiCard.imageUris().normal()
-            ));
+            return Optional.of(apiCard);
         } catch (HttpClientErrorException.BadRequest | HttpClientErrorException.NotFound exception) {
             return Optional.empty();
         } catch (RestClientException exception) {
             throw new ScryfallServiceException("Failed to fetch Scryfall card for MTGO catalog id " + catalogId, exception);
         }
+    }
+
+    private ScryfallCard toCard(int catalogId, ScryfallApiCard apiCard, boolean inferredBackFace) {
+        return new ScryfallCard(
+                catalogId,
+                apiCard.name(),
+                apiCard.typeLine(),
+                apiCard.manaCost(),
+                apiCard.oracleText(),
+                normalImageUrl(apiCard.imageUris()),
+                inferredBackFace
+        );
+    }
+
+    private Optional<ScryfallCard> backFaceCard(int catalogId, ScryfallApiCard apiCard) {
+        if (apiCard.cardFaces() == null || apiCard.cardFaces().size() < 2) {
+            return Optional.empty();
+        }
+
+        ScryfallCardFace backFace = apiCard.cardFaces().get(1);
+        return Optional.of(new ScryfallCard(
+                catalogId,
+                backFace.name(),
+                backFace.typeLine(),
+                backFace.manaCost(),
+                backFace.oracleText(),
+                normalImageUrl(backFace.imageUris(), apiCard.imageUris()),
+                true
+        ));
+    }
+
+    private boolean isDoubleFacedLayout(String layout) {
+        if (layout == null) {
+            return false;
+        }
+
+        String normalizedLayout = layout.toLowerCase(java.util.Locale.ROOT);
+        return "modal_dfc".equals(normalizedLayout) || "transform".equals(normalizedLayout);
+    }
+
+    private String normalImageUrl(ScryfallImageUris... imageUris) {
+        for (ScryfallImageUris imageUri : imageUris) {
+            if (imageUri != null && imageUri.normal() != null) {
+                return imageUri.normal();
+            }
+        }
+
+        return null;
     }
 
     private void throttleRequests() {
@@ -107,6 +171,18 @@ public class ScryfallService {
 
     @JsonIgnoreProperties(ignoreUnknown = true)
     private record ScryfallApiCard(
+            @JsonProperty("name") String name,
+            @JsonProperty("image_uris") ScryfallImageUris imageUris,
+            @JsonProperty("oracle_text") String oracleText,
+            @JsonProperty("mana_cost") String manaCost,
+            @JsonProperty("type_line") String typeLine,
+            @JsonProperty("layout") String layout,
+            @JsonProperty("card_faces") List<ScryfallCardFace> cardFaces
+    ) {
+    }
+
+    @JsonIgnoreProperties(ignoreUnknown = true)
+    private record ScryfallCardFace(
             @JsonProperty("name") String name,
             @JsonProperty("image_uris") ScryfallImageUris imageUris,
             @JsonProperty("oracle_text") String oracleText,

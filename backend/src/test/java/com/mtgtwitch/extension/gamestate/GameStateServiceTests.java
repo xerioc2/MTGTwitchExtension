@@ -149,6 +149,30 @@ class GameStateServiceTests {
         assertThat(gameTwo.handCards()).extracting(GameCard::catalogId).containsExactly(222001);
     }
 
+    @Test
+    void catalogIdZeroObjectsAreFilteredFromZoneCards() {
+        GameState gameState = gameStateService.apply(new GameStatusEvent(
+                1001L,
+                2001L,
+                2001L,
+                List.of(
+                        new PlayerState(1, "local", 50, 5, 20),
+                        new PlayerState(2, "opponent", 50, 5, 20)
+                ),
+                List.of(
+                        new GameCard(1, 0, "Hand", "Hand", 1, 1),
+                        new GameCard(2, 78632, "Hand", "Hand", 1, 1),
+                        new GameCard(3, 0, "Battlefield", "Battlefield", 2, 2),
+                        new GameCard(4, 82270, "Battlefield", "Battlefield", 2, 2)
+                ),
+                "raw"
+        ));
+
+        assertThat(gameState.hand()).doesNotContain("CatalogID 0");
+        assertThat(gameState.handCards()).extracting(GameCard::catalogId).containsExactly(78632);
+        assertThat(gameState.opponentBattlefieldCards()).extracting(GameCard::catalogId).containsExactly(82270);
+    }
+
     private GameStatusEvent statusEvent(long gameId, long matchId, int localHandCatalogId) {
         return new GameStatusEvent(
                 gameId,
