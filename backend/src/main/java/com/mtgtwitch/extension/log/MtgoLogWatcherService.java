@@ -108,6 +108,11 @@ public class MtgoLogWatcherService {
             return Optional.empty();
         }
 
+        if (!mtgoLogDiscoveryService.isLogAllowed(normalizedLogPath)) {
+            log.debug("Ignoring focused MTGO process log because it does not match configured MTGO accounts: {}", normalizedLogPath);
+            return Optional.empty();
+        }
+
         log.info("Switching MTGO log watcher to focused MTGO process log: old={}, new={}", logPath, normalizedLogPath);
         stopCurrentWatcher();
         return Optional.of(startWatching(normalizedLogPath));
@@ -148,6 +153,8 @@ public class MtgoLogWatcherService {
         }
 
         try {
+            mtgoLogDiscoveryService.resolveCandidateUsername(logPath)
+                    .ifPresent(mtgoLogParserService::recordLocalPlayerNameHint);
             lastKnownPosition = backfillLogTail(logPath);
             if (rawLogDebugEnabled) {
                 log.info("MTGO raw log debug mode is enabled; every new raw mtgo.log line will be written to the console.");

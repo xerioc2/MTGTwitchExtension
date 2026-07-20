@@ -12,10 +12,14 @@ import org.springframework.context.ConfigurableApplicationContext;
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
+import javax.swing.DefaultListModel;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
+import javax.swing.JList;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
+import javax.swing.JScrollPane;
+import javax.swing.ListSelectionModel;
 import javax.swing.SwingUtilities;
 import javax.swing.Timer;
 import java.awt.AWTException;
@@ -59,6 +63,7 @@ import java.nio.charset.StandardCharsets;
 import java.time.Instant;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Properties;
@@ -78,11 +83,7 @@ public class MtgoBridgeLauncher {
     private static final int TWITCH_CALLBACK_PORT = 8787;
     private static final String TWITCH_CALLBACK_PATH = "/callback";
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
-    private static final Path CONFIG_PATH = Path.of(
-            System.getenv("APPDATA") == null ? System.getProperty("user.home") : System.getenv("APPDATA"),
-            "MTGO Twitch Bridge",
-            "config.properties"
-    );
+    private static final Path CONFIG_PATH = BridgeLocalConfigStore.CONFIG_PATH;
     private static final String TWITCH_LOGIN_KEY = "twitch.login";
     private static final String CHANNEL_ID_KEY = "supabase.channel.id";
     private static final String RELAY_FUNCTION_URL_KEY = "supabase.relay.function.url";
@@ -106,6 +107,10 @@ public class MtgoBridgeLauncher {
     private JButton refreshButton;
     private JButton stopButton;
     private JCheckBox rememberLoginCheckbox;
+    private DefaultListModel<String> mtgoAccountsModel;
+    private JList<String> mtgoAccountsList;
+    private JButton addAccountButton;
+    private JButton removeAccountButton;
     private MenuItem logoutMenuItem;
     private TrayIcon trayIcon;
     private Image appIconImage;
@@ -190,8 +195,8 @@ public class MtgoBridgeLauncher {
             frame.setIconImage(appIconImage);
         }
         frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
-        frame.setSize(560, 340);
-        frame.setMinimumSize(new Dimension(520, 320));
+        frame.setSize(640, 430);
+        frame.setMinimumSize(new Dimension(580, 390));
         frame.setLocationRelativeTo(null);
 
         JPanel root = new JPanel(new BorderLayout(12, 12));
@@ -216,7 +221,10 @@ public class MtgoBridgeLauncher {
         lastActivityValue = addStatusRow(statusPanel, constraints, "Last log activity:", "Unknown");
         authStatusValue = addStatusRow(statusPanel, constraints, "Twitch channel:", "Not logged in");
 
-        root.add(statusPanel, BorderLayout.CENTER);
+        JPanel centerPanel = new JPanel(new BorderLayout(8, 8));
+        centerPanel.add(statusPanel, BorderLayout.NORTH);
+        centerPanel.add(createMtgoAccountsPanel(), BorderLayout.CENTER);
+        root.add(centerPanel, BorderLayout.CENTER);
 
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         rememberLoginCheckbox = new JCheckBox("Remember login", true);
@@ -248,6 +256,37 @@ public class MtgoBridgeLauncher {
             }
         };
         frame.addWindowStateListener(minimizeListener);
+    }
+
+    private JPanel createMtgoAccountsPanel() {
+        JPanel accountsPanel = new JPanel(new BorderLayout(8, 8));
+        accountsPanel.setBorder(BorderFactory.createTitledBorder("MTGO accounts"));
+
+        mtgoAccountsModel = new DefaultListModel<>();
+        BridgeLocalConfigStore.readMtgoUsernames(CONFIG_PATH).forEach(mtgoAccountsModel::addElement);
+        mtgoAccountsList = new JList<>(mtgoAccountsModel);
+        mtgoAccountsList.setVisibleRowCount(3);
+        mtgoAccountsList.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
+        mtgoAccountsList.addListSelectionListener(event -> updateAccountButtons());
+
+        JLabel helperText = new JLabel("Add every MTGO username you stream from. Empty means auto-pick the newest log.");
+        helperText.setFont(helperText.getFont().deriveFont(Font.PLAIN, 12f));
+        accountsPanel.add(helperText, BorderLayout.NORTH);
+        accountsPanel.add(new JScrollPane(mtgoAccountsList), BorderLayout.CENTER);
+
+        JPanel accountActions = new JPanel(new FlowLayout(FlowLayout.RIGHT, 6, 0));
+        addAccountButton = new JButton("+");
+        addAccountButton.setToolTipText("Add MTGO account");
+        addAccountButton.addActionListener(event -> addMtgoAccount());
+        removeAccountButton = new JButton("-");
+        removeAccountButton.setToolTipText("Remove selected MTGO account");
+        removeAccountButton.addActionListener(event -> removeSelectedMtgoAccount());
+        accountActions.add(addAccountButton);
+        accountActions.add(removeAccountButton);
+        accountsPanel.add(accountActions, BorderLayout.EAST);
+        updateAccountButtons();
+
+        return accountsPanel;
     }
 
     private JLabel addStatusRow(JPanel panel, GridBagConstraints constraints, String label, String initialValue) {
@@ -349,6 +388,112 @@ public class MtgoBridgeLauncher {
                     updateStatus(status);
                     setControlsEnabled(true);
                 }));
+    }
+
+    private void addMtgoAccount() {
+        String username = JOptionPane.showInputDialog(
+                frame,
+                "MTGO username:",
+                "Add MTGO Account",
+                JOptionPane.PLAIN_MESSAGE
+        );
+        List<String> usernames = BridgeLocalConfigStore.normalizeUsernames(java.util.Collections.singletonList(username));
+        if (usernames.isEmpty()) {
+            return;
+        }
+
+        String normalizedUsername = usernames.getFirst();
+        for (int index = 0; index < mtgoAccountsModel.size(); index++) {
+            if (mtgoAccountsModel.getElementAt(index).equalsIgnoreCase(normalizedUsername)) {
+                mtgoAccountsList.setSelectedIndex(index);
+                return;
+            }
+        }
+
+        mtgoAccountsModel.addElement(normalizedUsername);
+        mtgoAccountsList.setSelectedValue(normalizedUsername, true);
+        persistMtgoAccounts();
+    }
+
+    private void removeSelectedMtgoAccount() {
+        int selectedIndex = mtgoAccountsList == null ? -1 : mtgoAccountsList.getSelectedIndex();
+        if (selectedIndex < 0) {
+            return;
+        }
+
+        mtgoAccountsModel.remove(selectedIndex);
+        if (!mtgoAccountsModel.isEmpty()) {
+            mtgoAccountsList.setSelectedIndex(Math.min(selectedIndex, mtgoAccountsModel.size() - 1));
+        }
+        persistMtgoAccounts();
+    }
+
+    private void persistMtgoAccounts() {
+        List<String> usernames = currentMtgoAccounts();
+        try {
+            BridgeLocalConfigStore.writeMtgoUsernames(CONFIG_PATH, usernames);
+        } catch (IOException exception) {
+            JOptionPane.showMessageDialog(
+                    frame,
+                    "Could not save MTGO accounts:\n\n" + exception.getMessage(),
+                    WINDOW_TITLE,
+                    JOptionPane.ERROR_MESSAGE
+            );
+            return;
+        }
+
+        applyMtgoAccountsToBackend(usernames);
+    }
+
+    private void applyMtgoAccountsToBackend(List<String> usernames) {
+        if (applicationContext == null || !applicationContext.isActive()) {
+            return;
+        }
+
+        try {
+            String requestBody = objectMapper.writeValueAsString(new MtgoAccountsPayload(usernames));
+            HttpRequest request = HttpRequest.newBuilder(mtgoAccountsUri(serverPort))
+                    .header("Content-Type", "application/json")
+                    .PUT(HttpRequest.BodyPublishers.ofString(requestBody))
+                    .build();
+            httpClient.sendAsync(request, HttpResponse.BodyHandlers.ofString())
+                    .thenRun(() -> SwingUtilities.invokeLater(this::refreshLog))
+                    .exceptionally(exception -> {
+                        SwingUtilities.invokeLater(() -> JOptionPane.showMessageDialog(
+                                frame,
+                                "Saved MTGO accounts locally, but could not apply them until the bridge backend is reachable:\n\n"
+                                        + exception.getMessage(),
+                                WINDOW_TITLE,
+                                JOptionPane.WARNING_MESSAGE
+                        ));
+                        return null;
+                    });
+        } catch (IOException exception) {
+            JOptionPane.showMessageDialog(
+                    frame,
+                    "Saved MTGO accounts locally, but could not apply them until restart:\n\n" + exception.getMessage(),
+                    WINDOW_TITLE,
+                    JOptionPane.WARNING_MESSAGE
+            );
+        }
+    }
+
+    private List<String> currentMtgoAccounts() {
+        java.util.ArrayList<String> usernames = new java.util.ArrayList<>();
+        if (mtgoAccountsModel == null) {
+            return usernames;
+        }
+
+        for (int index = 0; index < mtgoAccountsModel.size(); index++) {
+            usernames.add(mtgoAccountsModel.getElementAt(index));
+        }
+        return BridgeLocalConfigStore.normalizeUsernames(usernames);
+    }
+
+    private void updateAccountButtons() {
+        if (removeAccountButton != null && mtgoAccountsList != null) {
+            removeAccountButton.setEnabled(mtgoAccountsList.getSelectedIndex() >= 0);
+        }
     }
 
     private void loginWithTwitch() {
@@ -591,8 +736,9 @@ public class MtgoBridgeLauncher {
             return Optional.empty();
         }
 
-        Properties properties = new Properties();
+        Properties properties;
         try (java.io.Reader reader = Files.newBufferedReader(CONFIG_PATH, StandardCharsets.UTF_8)) {
+            properties = new Properties();
             properties.load(reader);
         } catch (IOException exception) {
             return Optional.empty();
@@ -609,16 +755,13 @@ public class MtgoBridgeLauncher {
     }
 
     private void saveBridgeConfig(BridgeConfig config) throws IOException {
-        Files.createDirectories(CONFIG_PATH.getParent());
-        Properties properties = new Properties();
+        Properties properties = BridgeLocalConfigStore.loadProperties(CONFIG_PATH);
         properties.setProperty(TWITCH_LOGIN_KEY, config.twitchLogin());
         properties.setProperty(CHANNEL_ID_KEY, config.channelId());
         properties.setProperty(RELAY_FUNCTION_URL_KEY, config.relayFunctionUrl());
         properties.setProperty(BRIDGE_PUBLISH_TOKEN_KEY, config.bridgePublishToken());
 
-        try (java.io.Writer writer = Files.newBufferedWriter(CONFIG_PATH, StandardCharsets.UTF_8)) {
-            properties.store(writer, "MTGO Twitch Bridge");
-        }
+        BridgeLocalConfigStore.saveProperties(CONFIG_PATH, properties);
     }
 
     private void applyBridgeConfigIfPresent() {
@@ -668,7 +811,16 @@ public class MtgoBridgeLauncher {
 
     private void deleteBridgeConfig() {
         try {
-            Files.deleteIfExists(CONFIG_PATH);
+            Properties properties = BridgeLocalConfigStore.loadProperties(CONFIG_PATH);
+            properties.remove(TWITCH_LOGIN_KEY);
+            properties.remove(CHANNEL_ID_KEY);
+            properties.remove(RELAY_FUNCTION_URL_KEY);
+            properties.remove(BRIDGE_PUBLISH_TOKEN_KEY);
+            if (properties.isEmpty()) {
+                Files.deleteIfExists(CONFIG_PATH);
+            } else {
+                BridgeLocalConfigStore.saveProperties(CONFIG_PATH, properties);
+            }
         } catch (IOException ignored) {
             // Best effort: losing the in-memory token is enough for this process.
         }
@@ -808,6 +960,10 @@ public class MtgoBridgeLauncher {
         return URI.create("http://localhost:%d/api/rescan-log".formatted(port));
     }
 
+    private static URI mtgoAccountsUri(int port) {
+        return URI.create("http://localhost:%d/api/mtgo-accounts".formatted(port));
+    }
+
     private void setControlsEnabled(boolean enabled) {
         if (refreshButton != null) {
             refreshButton.setEnabled(enabled);
@@ -820,6 +976,12 @@ public class MtgoBridgeLauncher {
         }
         if (rememberLoginCheckbox != null) {
             rememberLoginCheckbox.setEnabled(enabled);
+        }
+        if (addAccountButton != null) {
+            addAccountButton.setEnabled(enabled);
+        }
+        if (removeAccountButton != null) {
+            removeAccountButton.setEnabled(enabled && mtgoAccountsList != null && mtgoAccountsList.getSelectedIndex() >= 0);
         }
         if (stopButton != null) {
             stopButton.setEnabled(true);
@@ -1020,6 +1182,9 @@ public class MtgoBridgeLauncher {
             String bridgeToken,
             String relayFunctionUrl
     ) {
+    }
+
+    private record MtgoAccountsPayload(List<String> usernames) {
     }
 
     private static boolean isBlank(String value) {

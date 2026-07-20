@@ -182,7 +182,7 @@ class MtgoLogWatcherServiceTests {
         private final MtgoLogWatcherService watcher;
 
         private Harness(Path logPath, long backfillBytes) {
-            this(new MtgoLogDiscoveryService(logPath.toString(), null), backfillBytes);
+            this(new MtgoLogDiscoveryService(logPath.toString(), (Path) null), backfillBytes);
         }
 
         private Harness(MtgoLogDiscoveryService discoveryService, long backfillBytes) {

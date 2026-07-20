@@ -59,6 +59,10 @@ public class MtgoLogParserService {
     private static final Pattern GAME_STATUS_PATTERN = Pattern.compile(
             "^\\d{2}:\\d{2}:\\d{2}\\s+\\[INF]\\s+\\(Twitch Info\\|Game Play Status Update for Game ID:\\s+(\\d+),\\s+Match ID:\\s+(\\d+),\\s+Event ID:\\s+(\\d+)\\)\\s+(\\{.*})$"
     );
+    private static final Pattern LOGIN_USERNAME_PATTERN = Pattern.compile(
+            "^\\d{2}:\\d{2}:\\d{2}\\s+\\[INF]\\s+\\(Login\\|MtGO Login (?:Last Success|Success)\\)\\s+Username:\\s+(.+?)(?:\\s+\\(\\d+\\))?$",
+            Pattern.CASE_INSENSITIVE
+    );
 
     private final GameStateService gameStateService;
     private final ObjectMapper objectMapper;
@@ -81,6 +85,10 @@ public class MtgoLogParserService {
     }
 
     public Optional<CardZoneEvent> parseAndApply(String rawLine) {
+        if (gameStateService != null) {
+            parseLoginUsername(rawLine).ifPresent(gameStateService::recordLocalPlayerNameHint);
+        }
+
         Optional<DeckCatalogEvent> deckCatalogEvent = parseDeckCatalogEvent(rawLine);
         if (deckCatalogEvent.isPresent()) {
             GameState gameState = gameStateService.updateDeckCatalogIds(deckCatalogEvent.get());
@@ -125,6 +133,19 @@ public class MtgoLogParserService {
         });
 
         return event;
+    }
+
+    public void recordLocalPlayerNameHint(String username) {
+        gameStateService.recordLocalPlayerNameHint(username);
+    }
+
+    public Optional<String> parseLoginUsername(String rawLine) {
+        Matcher matcher = LOGIN_USERNAME_PATTERN.matcher(rawLine.trim());
+        if (!matcher.matches()) {
+            return Optional.empty();
+        }
+
+        return Optional.of(matcher.group(1).trim());
     }
 
     public Optional<DeckCatalogEvent> parseDeckCatalogEvent(String rawLine) {

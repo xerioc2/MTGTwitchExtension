@@ -173,6 +173,28 @@ class GameStateServiceTests {
         assertThat(gameState.opponentBattlefieldCards()).extracting(GameCard::catalogId).containsExactly(82270);
     }
 
+    @Test
+    void localPlayerHintSelectsMatchingPlayerWhenDeckLineIsMissing() {
+        gameStateService.recordLocalPlayerNameHint("DB_xerioc");
+
+        GameState gameState = gameStateService.apply(new GameStatusEvent(
+                1001L,
+                2001L,
+                2001L,
+                List.of(
+                        new PlayerState(1, "opponent", 50, 5, 20),
+                        new PlayerState(2, "DB_xerioc", 50, 5, 20)
+                ),
+                List.of(
+                        new GameCard(1, 111001, "Hand", "Hand", 1, 1),
+                        new GameCard(2, 222001, "Hand", "Hand", 2, 2)
+                ),
+                "raw"
+        ));
+
+        assertThat(gameState.handCards()).extracting(GameCard::catalogId).containsExactly(222001);
+    }
+
     private GameStatusEvent statusEvent(long gameId, long matchId, int localHandCatalogId) {
         return new GameStatusEvent(
                 gameId,

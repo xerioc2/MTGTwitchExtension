@@ -29,6 +29,7 @@ public class GameStateService {
     private final GameStateBroadcaster gameStateBroadcaster;
     private Long activeGameId;
     private Long focusedGameId;
+    private String localPlayerNameHint;
     private int replayDepth;
     private boolean replayBroadcastPending;
 
@@ -89,6 +90,7 @@ public class GameStateService {
         PerGameState state = stateForGame(event.gameId());
         state.gameId = event.gameId();
         state.localPlayerName = event.username();
+        localPlayerNameHint = normalizePlayerName(event.username());
         state.deckCards = List.copyOf(event.deckCards());
         state.deckCatalogIds = state.deckCards.stream()
                 .map(DeckCard::catalogId)
@@ -118,6 +120,16 @@ public class GameStateService {
         GameState gameState = snapshot();
         broadcastOrDefer(gameState);
         return gameState;
+    }
+
+    public synchronized void recordLocalPlayerNameHint(String username) {
+        String normalizedUsername = normalizePlayerName(username);
+        if (normalizedUsername == null) {
+            return;
+        }
+
+        localPlayerNameHint = normalizedUsername;
+        log.info("MTGO local player hint updated from active log: {}", normalizedUsername);
     }
 
     public synchronized GameState focusGame(long gameId) {
@@ -203,6 +215,9 @@ public class GameStateService {
     private PerGameState stateForStatusEvent(GameStatusEvent event) {
         PerGameState state = games.get(event.gameId());
         if (state != null) {
+            if ((state.localPlayerName == null || state.localPlayerName.isBlank()) && localPlayerNameHint != null) {
+                state.localPlayerName = localPlayerNameHint;
+            }
             return state;
         }
 
@@ -213,6 +228,9 @@ public class GameStateService {
             state.deckCards = eventDeckState.deckCards;
             state.deckCatalogIds = eventDeckState.deckCatalogIds;
             state.detectionRegions = eventDeckState.detectionRegions;
+        }
+        if (state.localPlayerName == null || state.localPlayerName.isBlank()) {
+            state.localPlayerName = localPlayerNameHint;
         }
 
         return state;
@@ -348,6 +366,14 @@ public class GameStateService {
         }
 
         return playerName.toLowerCase(Locale.ROOT).equals(expectedName.toLowerCase(Locale.ROOT));
+    }
+
+    private String normalizePlayerName(String username) {
+        if (username == null || username.isBlank()) {
+            return null;
+        }
+
+        return username.trim();
     }
 
     private void addStatusCard(PerGameState state, GameCard card) {

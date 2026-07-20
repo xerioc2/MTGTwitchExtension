@@ -105,6 +105,13 @@ class MtgoLogParserServiceTests {
     }
 
     @Test
+    void parsesLoginUsernameHint() {
+        assertThat(parser.parseLoginUsername(
+                "10:25:14 [INF] (Login|MtGO Login Success) Username: DB_xerioc (3308837)"
+        )).contains("DB_xerioc");
+    }
+
+    @Test
     void parsesTwitchGameStatusUpdate() {
         Optional<GameStatusEvent> event = parser.parseGameStatusEvent("""
                 17:23:30 [INF] (Twitch Info|Game Play Status Update for Game ID: 950656092, Match ID: 287056035, Event ID: 287056035) {"Players":[{"Id":1,"Name":"DB_xerioc","LibraryCount":51,"HandCount":6,"Life":19},{"Id":0,"Name":"SaltySushi6","LibraryCount":50,"HandCount":5,"Life":16}],"Cards":[{"Id":423,"CatalogID":47471,"Zone":"Battlefield","ActualZone":"Battlefield","Owner":0,"Controller":0},{"Id":428,"CatalogID":122024,"Zone":"Battlefield","ActualZone":"Battlefield","Owner":1,"Controller":1},{"Id":425,"CatalogID":90565,"Zone":"Graveyard","ActualZone":"Graveyard","Owner":1,"Controller":1},{"Id":421,"CatalogID":78632,"Zone":"Hand","ActualZone":"Hand","Owner":1,"Controller":1},{"Id":441,"CatalogID":50256,"Zone":"Stack","ActualZone":"Stack","Owner":0,"Controller":0}]}

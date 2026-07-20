@@ -119,13 +119,12 @@ public class WindowsFocusMonitor {
         }
 
         long nextGameId = gameId.getAsLong();
-        if (lastObservedGameId != null && lastObservedGameId == nextGameId) {
-            return;
+        boolean focusChanged = lastObservedGameId == null || lastObservedGameId != nextGameId;
+        if (focusChanged) {
+            lastObservedGameId = nextGameId;
+            log.info("MTGO foreground game focus changed: gameId={}, title={}", nextGameId, windowTitle);
+            gameStateService.focusGame(nextGameId);
         }
-
-        lastObservedGameId = nextGameId;
-        log.debug("MTGO foreground game focus changed: gameId={}, title={}", nextGameId, windowTitle);
-        gameStateService.focusGame(nextGameId);
 
         resolveProcessImagePath(hwnd)
                 .flatMap(WindowsFocusMonitor::deriveLogPathFromExecutable)
