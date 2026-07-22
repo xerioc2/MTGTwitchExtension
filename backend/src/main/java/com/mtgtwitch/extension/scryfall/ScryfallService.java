@@ -2,6 +2,8 @@ package com.mtgtwitch.extension.scryfall;
 
 import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
 import com.fasterxml.jackson.annotation.JsonProperty;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.web.client.RestTemplateBuilder;
 import org.springframework.stereotype.Service;
@@ -14,26 +16,46 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 public class ScryfallService {
 
+    private static final Logger log = LoggerFactory.getLogger(ScryfallService.class);
     private static final String SCRYFALL_MTGO_CARD_URL = "https://api.scryfall.com/cards/mtgo/{catalogId}";
 
     private final RestTemplate restTemplate;
     private final Duration requestDelay;
+    private final RemoteCardResolverClient remoteCardResolverClient;
+    private final TokenOverrideCatalog tokenOverrideCatalog;
     private final Map<Integer, ScryfallCard> cache = new ConcurrentHashMap<>();
+    private final Set<Integer> unresolvedCatalogIdsLogged = ConcurrentHashMap.newKeySet();
     private long lastRequestNanos;
 
     @Autowired
-    public ScryfallService(RestTemplateBuilder restTemplateBuilder) {
-        this(restTemplateBuilder.build(), Duration.ofMillis(100));
+    public ScryfallService(
+            RestTemplateBuilder restTemplateBuilder,
+            RemoteCardResolverClient remoteCardResolverClient,
+            TokenOverrideCatalog tokenOverrideCatalog
+    ) {
+        this(restTemplateBuilder.build(), Duration.ofMillis(100), remoteCardResolverClient, tokenOverrideCatalog);
     }
 
     ScryfallService(RestTemplate restTemplate, Duration requestDelay) {
+        this(restTemplate, requestDelay, RemoteCardResolverClient.disabled(), new TokenOverrideCatalog(Map.of()));
+    }
+
+    ScryfallService(
+            RestTemplate restTemplate,
+            Duration requestDelay,
+            RemoteCardResolverClient remoteCardResolverClient,
+            TokenOverrideCatalog tokenOverrideCatalog
+    ) {
         this.restTemplate = restTemplate;
         this.requestDelay = requestDelay;
+        this.remoteCardResolverClient = remoteCardResolverClient;
+        this.tokenOverrideCatalog = tokenOverrideCatalog;
     }
 
     public synchronized Map<Integer, ScryfallCard> fetchCards(List<Integer> catalogIds) {
@@ -47,15 +69,24 @@ public class ScryfallService {
     }
 
     public synchronized Optional<ScryfallCard> fetchCard(int catalogId) {
+        if (catalogId <= 0) {
+            return Optional.empty();
+        }
+
         ScryfallCard cachedCard = cache.get(catalogId);
         if (cachedCard != null) {
             return Optional.of(cachedCard);
         }
 
-        Optional<ScryfallCard> fetchedCard = fetchApiCard(catalogId)
-                .map(apiCard -> toCard(catalogId, apiCard, false))
-                .or(() -> inferBackFace(catalogId));
+        Optional<ScryfallCard> fetchedCard = remoteCardResolverClient.resolve(catalogId)
+                .or(() -> tokenOverrideCatalog.find(catalogId))
+                .or(() -> fetchApiCard(catalogId)
+                        .map(apiCard -> toCard(catalogId, apiCard, false))
+                        .or(() -> inferBackFace(catalogId)));
         fetchedCard.ifPresent(card -> cache.put(catalogId, card));
+        if (fetchedCard.isEmpty() && unresolvedCatalogIdsLogged.add(catalogId)) {
+            log.info("Unresolved MTGO catalog id {}; add a token override if this is a token.", catalogId);
+        }
         return fetchedCard;
     }
 

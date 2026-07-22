@@ -377,27 +377,29 @@ public class GameStateService {
     }
 
     private void addStatusCard(PerGameState state, GameCard card) {
-        if (card.catalogId() <= 0) {
-            return;
-        }
-
         Zone.fromLogText(card.actualZone())
                 .filter(zone -> zone != Zone.EXILE || card.zone().equalsIgnoreCase("Exile"))
                 .ifPresent(zone -> {
+                    if (card.catalogId() <= 0 && zone != Zone.BATTLEFIELD) {
+                        return;
+                    }
+
                     state.zoneCards.get(zone).add(card);
                     state.zones.get(zone).add(card.displayName());
                 });
     }
 
     private void addOpponentStatusCard(PerGameState state, GameCard card) {
-        if (card.catalogId() <= 0) {
-            return;
-        }
-
         Zone.fromLogText(card.actualZone())
                 .filter(zone -> zone == Zone.BATTLEFIELD || zone == Zone.GRAVEYARD || zone == Zone.EXILE)
                 .filter(zone -> zone != Zone.EXILE || card.zone().equalsIgnoreCase("Exile"))
-                .ifPresent(zone -> state.opponentZoneCards.get(zone).add(card));
+                .ifPresent(zone -> {
+                    if (card.catalogId() <= 0 && zone != Zone.BATTLEFIELD) {
+                        return;
+                    }
+
+                    state.opponentZoneCards.get(zone).add(card);
+                });
     }
 
     private void pruneExpiredDetectionRegions(PerGameState state, Instant now) {

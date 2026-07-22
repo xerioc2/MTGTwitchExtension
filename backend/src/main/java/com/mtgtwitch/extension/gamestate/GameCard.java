@@ -9,6 +9,10 @@ public record GameCard(
         int controller
 ) {
     public String displayName() {
+        if (catalogId <= 0) {
+            return "Face-down card";
+        }
+
         return "CatalogID " + catalogId;
     }
 }

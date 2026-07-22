@@ -150,7 +150,7 @@ class GameStateServiceTests {
     }
 
     @Test
-    void catalogIdZeroObjectsAreFilteredFromZoneCards() {
+    void catalogIdZeroHiddenObjectsAreFilteredUnlessVisibleFaceDownCards() {
         GameState gameState = gameStateService.apply(new GameStatusEvent(
                 1001L,
                 2001L,
@@ -162,15 +162,19 @@ class GameStateServiceTests {
                 List.of(
                         new GameCard(1, 0, "Hand", "Hand", 1, 1),
                         new GameCard(2, 78632, "Hand", "Hand", 1, 1),
-                        new GameCard(3, 0, "Battlefield", "Battlefield", 2, 2),
-                        new GameCard(4, 82270, "Battlefield", "Battlefield", 2, 2)
+                        new GameCard(3, 0, "Battlefield", "Battlefield", 1, 1),
+                        new GameCard(4, 0, "Command", "Command", 2, 2),
+                        new GameCard(5, 0, "Battlefield", "Battlefield", 2, 2),
+                        new GameCard(6, 82270, "Battlefield", "Battlefield", 2, 2)
                 ),
                 "raw"
         ));
 
         assertThat(gameState.hand()).doesNotContain("CatalogID 0");
         assertThat(gameState.handCards()).extracting(GameCard::catalogId).containsExactly(78632);
-        assertThat(gameState.opponentBattlefieldCards()).extracting(GameCard::catalogId).containsExactly(82270);
+        assertThat(gameState.battlefield()).containsExactly("Face-down card");
+        assertThat(gameState.battlefieldCards()).extracting(GameCard::catalogId).containsExactly(0);
+        assertThat(gameState.opponentBattlefieldCards()).extracting(GameCard::catalogId).containsExactly(0, 82270);
     }
 
     @Test

@@ -40,5 +40,6 @@ supabase:
   service-role-key: ${SUPABASE_SERVICE_ROLE_KEY:}
   channel-id: ${SUPABASE_CHANNEL_ID:}
   relay-function-url: ${SUPABASE_RELAY_FUNCTION_URL:}
+  card-resolver-function-url: ${SUPABASE_CARD_RESOLVER_FUNCTION_URL:}
   bridge-publish-token: ${BRIDGE_PUBLISH_TOKEN:}
   issue-token-url: ${SUPABASE_ISSUE_TOKEN_URL:https://lgzmxstmqzwjbmurstye.supabase.co/functions/v1/issue-bridge-token}

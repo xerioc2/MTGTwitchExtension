@@ -89,7 +89,8 @@ Deno.serve(async (request) => {
   return json({
     channelId,
     bridgeToken,
-    relayFunctionUrl: `${SUPABASE_URL.replace(/\/+$/, "")}/functions/v1/publish-game-state`
+    relayFunctionUrl: `${SUPABASE_URL.replace(/\/+$/, "")}/functions/v1/publish-game-state`,
+    cardResolverFunctionUrl: `${SUPABASE_URL.replace(/\/+$/, "")}/functions/v1/resolve-card`
   });
 });
 

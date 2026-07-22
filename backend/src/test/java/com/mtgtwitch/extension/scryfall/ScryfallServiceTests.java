@@ -1,6 +1,7 @@
 package com.mtgtwitch.extension.scryfall;
 
 import org.junit.jupiter.api.Test;
+import org.springframework.http.HttpMethod;
 import org.springframework.http.MediaType;
 import org.springframework.test.web.client.MockRestServiceServer;
 import org.springframework.web.client.RestTemplate;
@@ -11,6 +12,8 @@ import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.client.ExpectedCount.once;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
+import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.requestTo;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withResourceNotFound;
 import static org.springframework.test.web.client.response.MockRestResponseCreators.withSuccess;
@@ -50,6 +53,85 @@ class ScryfallServiceTests {
                 false
         ));
         assertThat(secondResult.get(78632)).isSameAs(firstResult.get(78632));
+        server.verify();
+    }
+
+    @Test
+    void tokenOverrideResolvesWithoutScryfallRequest() {
+        RestTemplate restTemplate = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(restTemplate).build();
+        ScryfallService service = new ScryfallService(
+                restTemplate,
+                Duration.ZERO,
+                RemoteCardResolverClient.disabled(),
+                new TokenOverrideCatalog(Map.of(
+                        125873,
+                        new TokenOverrideCatalog.TokenOverride(
+                                "Cat Token",
+                                "Token Creature - Cat",
+                                "",
+                                "",
+                                "https://cards.scryfall.io/normal/front/cat-token.jpg",
+                                true
+                        )
+                ))
+        );
+
+        assertThat(service.fetchCard(125873)).contains(new ScryfallCard(
+                125873,
+                "Cat Token",
+                "Token Creature - Cat",
+                "",
+                "",
+                "https://cards.scryfall.io/normal/front/cat-token.jpg",
+                false,
+                true
+        ));
+        server.verify();
+    }
+
+    @Test
+    void remoteResolverIsUsedBeforeLocalScryfallLookup() {
+        RestTemplate restTemplate = new RestTemplate();
+        MockRestServiceServer server = MockRestServiceServer.bindTo(restTemplate).build();
+        RemoteCardResolverClient remoteResolverClient = new RemoteCardResolverClient(
+                restTemplate,
+                "https://example.supabase.co/functions/v1/resolve-card",
+                "bridge-token"
+        );
+        ScryfallService service = new ScryfallService(
+                restTemplate,
+                Duration.ZERO,
+                remoteResolverClient,
+                new TokenOverrideCatalog(Map.of())
+        );
+
+        server.expect(once(), requestTo("https://example.supabase.co/functions/v1/resolve-card"))
+                .andExpect(method(HttpMethod.POST))
+                .andExpect(header("Authorization", "Bearer bridge-token"))
+                .andRespond(withSuccess("""
+                        {
+                          "catalogId": 125873,
+                          "name": "Cat Token",
+                          "typeLine": "Token Creature - Cat",
+                          "manaCost": "",
+                          "oracleText": "",
+                          "imageUrl": "https://cards.scryfall.io/normal/front/cat-token.jpg",
+                          "inferredBackFace": false,
+                          "token": true
+                        }
+                        """, MediaType.APPLICATION_JSON));
+
+        assertThat(service.fetchCard(125873)).contains(new ScryfallCard(
+                125873,
+                "Cat Token",
+                "Token Creature - Cat",
+                "",
+                "",
+                "https://cards.scryfall.io/normal/front/cat-token.jpg",
+                false,
+                true
+        ));
         server.verify();
     }
 

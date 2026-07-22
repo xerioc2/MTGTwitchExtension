@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mtgtwitch.extension.MtgoTwitchExtensionApplication;
 import com.mtgtwitch.extension.log.LogWatchStatus;
 import com.mtgtwitch.extension.relay.SupabaseRelayPublisher;
+import com.mtgtwitch.extension.scryfall.RemoteCardResolverClient;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
 import org.springframework.boot.builder.SpringApplicationBuilder;
@@ -87,6 +88,7 @@ public class MtgoBridgeLauncher {
     private static final String TWITCH_LOGIN_KEY = "twitch.login";
     private static final String CHANNEL_ID_KEY = "supabase.channel.id";
     private static final String RELAY_FUNCTION_URL_KEY = "supabase.relay.function.url";
+    private static final String CARD_RESOLVER_FUNCTION_URL_KEY = "supabase.card.resolver.function.url";
     private static final String BRIDGE_PUBLISH_TOKEN_KEY = "bridge.publish.token";
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter
             .ofPattern("MMM d, h:mm:ss a")
@@ -536,6 +538,7 @@ public class MtgoBridgeLauncher {
                         issuedToken.channelId(),
                         issuedToken.channelId(),
                         issuedToken.relayFunctionUrl(),
+                        issuedToken.cardResolverFunctionUrl(),
                         issuedToken.bridgeToken()
                 );
                 boolean rememberLogin = rememberLoginCheckbox == null || rememberLoginCheckbox.isSelected();
@@ -744,10 +747,17 @@ public class MtgoBridgeLauncher {
             return Optional.empty();
         }
 
+        String relayFunctionUrl = properties.getProperty(RELAY_FUNCTION_URL_KEY, "");
+        String cardResolverFunctionUrl = properties.getProperty(
+                CARD_RESOLVER_FUNCTION_URL_KEY,
+                inferCardResolverFunctionUrl(relayFunctionUrl)
+        );
+
         BridgeConfig config = new BridgeConfig(
                 properties.getProperty(TWITCH_LOGIN_KEY, ""),
                 properties.getProperty(CHANNEL_ID_KEY, ""),
-                properties.getProperty(RELAY_FUNCTION_URL_KEY, ""),
+                relayFunctionUrl,
+                cardResolverFunctionUrl,
                 properties.getProperty(BRIDGE_PUBLISH_TOKEN_KEY, "")
         );
 
@@ -759,9 +769,28 @@ public class MtgoBridgeLauncher {
         properties.setProperty(TWITCH_LOGIN_KEY, config.twitchLogin());
         properties.setProperty(CHANNEL_ID_KEY, config.channelId());
         properties.setProperty(RELAY_FUNCTION_URL_KEY, config.relayFunctionUrl());
+        if (isBlank(config.cardResolverFunctionUrl())) {
+            properties.remove(CARD_RESOLVER_FUNCTION_URL_KEY);
+        } else {
+            properties.setProperty(CARD_RESOLVER_FUNCTION_URL_KEY, config.cardResolverFunctionUrl());
+        }
         properties.setProperty(BRIDGE_PUBLISH_TOKEN_KEY, config.bridgePublishToken());
 
         BridgeLocalConfigStore.saveProperties(CONFIG_PATH, properties);
+    }
+
+    private String inferCardResolverFunctionUrl(String relayFunctionUrl) {
+        if (isBlank(relayFunctionUrl)) {
+            return "";
+        }
+
+        String normalized = relayFunctionUrl.trim().replaceAll("/+$", "");
+        String relaySuffix = "/functions/v1/publish-game-state";
+        if (!normalized.endsWith(relaySuffix)) {
+            return "";
+        }
+
+        return normalized.substring(0, normalized.lastIndexOf('/') + 1) + "resolve-card";
     }
 
     private void applyBridgeConfigIfPresent() {
@@ -773,6 +802,8 @@ public class MtgoBridgeLauncher {
     private void configurePublisher(BridgeConfig config) {
         applicationContext.getBean(SupabaseRelayPublisher.class)
                 .configure(config.channelId(), config.relayFunctionUrl(), config.bridgePublishToken());
+        applicationContext.getBean(RemoteCardResolverClient.class)
+                .configure(config.cardResolverFunctionUrl(), config.bridgePublishToken());
     }
 
     private void logout() {
@@ -784,6 +815,7 @@ public class MtgoBridgeLauncher {
         ConfigurableApplicationContext context = applicationContext;
         if (context != null && context.isActive()) {
             context.getBean(SupabaseRelayPublisher.class).configure("", "", "");
+            context.getBean(RemoteCardResolverClient.class).configure("", "");
         }
         updateAuthUi();
     }
@@ -815,6 +847,7 @@ public class MtgoBridgeLauncher {
             properties.remove(TWITCH_LOGIN_KEY);
             properties.remove(CHANNEL_ID_KEY);
             properties.remove(RELAY_FUNCTION_URL_KEY);
+            properties.remove(CARD_RESOLVER_FUNCTION_URL_KEY);
             properties.remove(BRIDGE_PUBLISH_TOKEN_KEY);
             if (properties.isEmpty()) {
                 Files.deleteIfExists(CONFIG_PATH);
@@ -1157,6 +1190,7 @@ public class MtgoBridgeLauncher {
             String twitchLogin,
             String channelId,
             String relayFunctionUrl,
+            String cardResolverFunctionUrl,
             String bridgePublishToken
     ) {
         private boolean isComplete() {
@@ -1180,7 +1214,8 @@ public class MtgoBridgeLauncher {
     private record IssuedBridgeToken(
             String channelId,
             String bridgeToken,
-            String relayFunctionUrl
+            String relayFunctionUrl,
+            String cardResolverFunctionUrl
     ) {
     }
 

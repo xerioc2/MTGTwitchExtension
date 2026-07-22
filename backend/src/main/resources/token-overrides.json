@@ -1,0 +1,10 @@
+{
+  "125873": {
+    "name": "Cat Token",
+    "typeLine": "Token Creature - Cat",
+    "manaCost": "",
+    "oracleText": "",
+    "imageUrl": "https://cards.scryfall.io/normal/front/7/d/7d400b41-813d-4a63-848f-5eb4db4bf3bb.jpg?1783903575",
+    "token": true
+  }
+}

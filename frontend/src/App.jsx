@@ -16,6 +16,18 @@ const shouldUseSupabaseRelay = Boolean(supabaseConfig.url && supabaseConfig.anon
 const enableScreenDetections = import.meta.env.VITE_ENABLE_SCREEN_DETECTIONS === 'true';
 // manapool.com must be declared as an allowed external domain in Twitch extension capabilities.
 const MANA_POOL_REF = 'mtgcontent';
+const TOKEN_CARD_OVERRIDES = {
+  125873: {
+    catalogId: 125873,
+    name: 'Cat Token',
+    typeLine: 'Token Creature - Cat',
+    manaCost: '',
+    oracleText: '',
+    imageUrl: 'https://cards.scryfall.io/normal/front/7/d/7d400b41-813d-4a63-848f-5eb4db4bf3bb.jpg?1783903575',
+    inferredBackFace: false,
+    token: true
+  }
+};
 const emptyGameState = {
   hand: [],
   battlefield: [],
@@ -112,7 +124,12 @@ function toManaPoolSlug(name) {
 }
 
 function manaPoolUrl(cardName) {
-  if (!cardName || cardName.startsWith('Catalog ID') || cardName.startsWith('CatalogID')) {
+  if (
+    !cardName
+    || cardName === 'Face-down card'
+    || cardName.startsWith('Catalog ID')
+    || cardName.startsWith('CatalogID')
+  ) {
     return null;
   }
 
@@ -436,14 +453,14 @@ function ExtensionPanel({ isOverlay }) {
 
     for (const zone of zones) {
       for (const card of gameState[zone.cardsKey] ?? []) {
-        if (card.catalogId) {
+        if (card.catalogId > 0) {
           catalogIds.add(card.catalogId);
         }
       }
 
       for (const cardName of gameState[zone.key] ?? []) {
         const fallbackCard = normalizeFallbackCard(cardName, 0);
-        if (fallbackCard.catalogId) {
+        if (fallbackCard.catalogId > 0) {
           catalogIds.add(fallbackCard.catalogId);
         }
       }
@@ -451,14 +468,14 @@ function ExtensionPanel({ isOverlay }) {
 
     for (const zone of opponentZones) {
       for (const card of gameState[zone.key] ?? []) {
-        if (card.catalogId) {
+        if (card.catalogId > 0) {
           catalogIds.add(card.catalogId);
         }
       }
     }
 
     for (const card of gameState.deckCards ?? []) {
-      if (card.catalogId) {
+      if (card.catalogId > 0) {
         catalogIds.add(card.catalogId);
       }
     }
@@ -778,11 +795,12 @@ function ExtensionPanel({ isOverlay }) {
       ? Math.max(8, rect.left - previewWidth - 8)
       : Math.min(rect.right + 8, window.innerWidth - previewWidth - 10);
 
+    const canResolveCatalogId = Number(card.catalogId) > 0;
     const didSetPreview = setPreviewCard({
       ...card,
       top: Math.min(rect.top, window.innerHeight - 260),
       left: previewLeft,
-      loading: !cardDetailsByCatalogId[card.catalogId]
+      loading: canResolveCatalogId && !cardDetailsByCatalogId[card.catalogId]
     });
 
     if (!didSetPreview) {
@@ -792,7 +810,7 @@ function ExtensionPanel({ isOverlay }) {
     const resolvedName = cardDetailsByCatalogId[card.catalogId]?.name ?? card.name;
     fetchManaPoolPrice(resolvedName);
 
-    if (!card.catalogId || cardDetailsByCatalogId[card.catalogId]) {
+    if (!canResolveCatalogId || cardDetailsByCatalogId[card.catalogId]) {
       return;
     }
 
@@ -1309,7 +1327,31 @@ function DeckExportPanel({ deckText, isResolving, copyStatus, onCopy, onClose })
   );
 }
 
+function isHiddenFaceDownCard(card) {
+  return Number(card?.catalogId) <= 0;
+}
+
+function hiddenFaceDownDetails() {
+  return {
+    name: 'Face-down card',
+    manaCost: '',
+    typeLine: 'Hidden card',
+    oracleText: 'Card identity is hidden.',
+    imageUri: '',
+    imageUrl: ''
+  };
+}
+
 function normalizeCard(card) {
+  if (isHiddenFaceDownCard(card)) {
+    return {
+      id: card.id,
+      catalogId: Number(card.catalogId ?? 0),
+      ...hiddenFaceDownDetails(),
+      quantity: 1
+    };
+  }
+
   return {
     id: card.id,
     catalogId: card.catalogId,
@@ -1336,10 +1378,27 @@ function normalizeDecklistCard(deckCard) {
 
 function normalizeFallbackCard(cardName, index) {
   const catalogIdMatch = String(cardName).match(/CatalogID\s+(\d+)/i);
+  const isExplicitHiddenCard = String(cardName) === 'Face-down card';
+  let catalogId = index;
+
+  if (isExplicitHiddenCard) {
+    catalogId = 0;
+  } else if (catalogIdMatch) {
+    catalogId = Number(catalogIdMatch[1]);
+  }
+
+  if ((catalogIdMatch && catalogId <= 0) || isExplicitHiddenCard) {
+    return {
+      id: index,
+      catalogId,
+      ...hiddenFaceDownDetails(),
+      quantity: 1
+    };
+  }
 
   return {
     id: index,
-    catalogId: catalogIdMatch ? Number(catalogIdMatch[1]) : index,
+    catalogId,
     name: String(cardName),
     manaCost: '',
     typeLine: '',
@@ -1434,6 +1493,10 @@ function getManaPoolPrice(card, cardDetailsByCatalogId, manaPoolPriceByName) {
 }
 
 function buildPlaceholderCard(card) {
+  if (isHiddenFaceDownCard(card)) {
+    return hiddenFaceDownDetails();
+  }
+
   return {
     name: card.name,
     normalImageUri: '',
@@ -1445,6 +1508,10 @@ function buildPlaceholderCard(card) {
 }
 
 async function fetchCardDetailsFromBackendOrScryfall(catalogId) {
+  if (catalogId <= 0) {
+    throw new Error(`Card ${catalogId} was not found.`);
+  }
+
   try {
     const response = await fetch(`${backendApiUrl}/api/cards/${catalogId}`);
     if (response.ok) {
@@ -1458,6 +1525,11 @@ async function fetchCardDetailsFromBackendOrScryfall(catalogId) {
 }
 
 async function fetchCardDetailsFromScryfall(catalogId) {
+  const tokenOverride = TOKEN_CARD_OVERRIDES[catalogId];
+  if (tokenOverride) {
+    return tokenOverride;
+  }
+
   const card = await fetchScryfallCard(`https://api.scryfall.com/cards/mtgo/${catalogId}`);
   if (card) {
     return mapScryfallCard(catalogId, card, false);
@@ -1479,7 +1551,8 @@ function mapScryfallCard(catalogId, card, inferredBackFace) {
     manaCost: card.mana_cost,
     oracleText: card.oracle_text,
     imageUrl: card.image_uris?.normal || card.card_faces?.[0]?.image_uris?.normal,
-    inferredBackFace
+    inferredBackFace,
+    token: false
   };
 }
 
@@ -1511,7 +1584,8 @@ async function inferScryfallBackFace(catalogId) {
       manaCost: backFace.mana_cost,
       oracleText: backFace.oracle_text,
       imageUrl: backFace.image_uris?.normal || neighborCard.image_uris?.normal,
-      inferredBackFace: true
+      inferredBackFace: true,
+      token: false
     };
   }
 
