@@ -1,3 +1,5 @@
+import { applyStableOverrideArt } from "./variant-selection.ts";
+
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
 const SUPABASE_ADMIN_KEY = Deno.env.get("MTGO_SUPABASE_SECRET_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
 const SCRYFALL_USER_AGENT = Deno.env.get("SCRYFALL_USER_AGENT") ?? "MTGTwitchExtension/0.0.1";
@@ -20,6 +22,11 @@ type CardRow = {
   inferred_back_face?: boolean | null;
   token?: boolean | null;
   source?: string | null;
+};
+
+type OverrideArtRow = {
+  image_url: string;
+  scryfall_id?: string | null;
 };
 
 type ResolvedCard = {
@@ -128,7 +135,23 @@ async function findOverride(catalogId: number) {
   });
 
   const rows = await restGet<CardRow>("mtgo_card_overrides", params);
-  return rows[0] ? cardFromRow(rows[0], { inferredBackFace: false, token: true }) : null;
+  if (!rows[0]) {
+    return null;
+  }
+
+  const artRows = await findOverrideArt(catalogId);
+  const card = cardFromRow(rows[0], { inferredBackFace: false, token: true });
+  return applyStableOverrideArt(card, catalogId, artRows);
+}
+
+async function findOverrideArt(catalogId: number) {
+  const params = new URLSearchParams({
+    mtgo_catalog_id: `eq.${catalogId}`,
+    select: "image_url,scryfall_id",
+    order: "id.asc"
+  });
+
+  return await restGet<OverrideArtRow>("mtgo_card_override_art", params);
 }
 
 async function findCachedCard(catalogId: number) {
