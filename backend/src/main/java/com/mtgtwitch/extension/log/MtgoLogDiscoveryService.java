@@ -66,21 +66,28 @@ public class MtgoLogDiscoveryService {
     }
 
     public List<LogCandidate> listCandidates() {
+        LogDiscoveryProgress.beginScan();
         if (StringUtils.hasText(configuredLogPath)) {
             Path configuredPath = Path.of(configuredLogPath).toAbsolutePath().normalize();
             log.info("Using MTGO_LOG_PATH from configuration: {}", configuredPath);
+            LogDiscoveryProgress.candidateFound();
+            LogDiscoveryProgress.complete(configuredPath);
             return List.of(new LogCandidate(configuredPath, lastModifiedTimeSafe(configuredPath)));
         }
 
         Path resolvedSearchRoot = searchRoot != null ? searchRoot : localAppDataAppsRoot();
         if (!Files.isDirectory(resolvedSearchRoot)) {
             log.error("MTGO_LOG_PATH is not configured and MTGO Apps root does not exist: {}", resolvedSearchRoot);
+            LogDiscoveryProgress.fail("MTGO Apps root does not exist: " + resolvedSearchRoot);
             return List.of();
         }
 
         try (Stream<Path> candidates = Files.find(resolvedSearchRoot, MAX_LOG_PARENT_SCAN_DEPTH + 1, this::isMtgoLogCandidate)) {
             List<LogCandidate> logCandidates = candidates
-                    .map(path -> new LogCandidate(path.toAbsolutePath().normalize(), lastModifiedTimeSafe(path)))
+                    .map(path -> {
+                        LogDiscoveryProgress.candidateFound();
+                        return new LogCandidate(path.toAbsolutePath().normalize(), lastModifiedTimeSafe(path));
+                    })
                     .toList();
 
             logCandidates.forEach(candidate -> log.info(
@@ -99,13 +106,16 @@ public class MtgoLogDiscoveryService {
 
             if (resolvedPath.isPresent()) {
                 log.info("Auto-discovered MTGO log file: {}", resolvedPath.get());
+                LogDiscoveryProgress.complete(resolvedPath.get());
             } else {
                 log.error("No MTGO log file found under {} within directory depth {}.", resolvedSearchRoot, MAX_LOG_PARENT_SCAN_DEPTH);
+                LogDiscoveryProgress.complete(null);
             }
 
             return logCandidates;
         } catch (IOException exception) {
             log.error("Failed while scanning for MTGO log files under {}.", resolvedSearchRoot, exception);
+            LogDiscoveryProgress.fail("Failed while scanning for MTGO log files under " + resolvedSearchRoot + ".");
             return List.of();
         }
     }

@@ -28,12 +28,22 @@ if ($LASTEXITCODE -ne 0) {
 $packageDir = Join-Path $projectRoot "dist\windows-package"
 $inputDir = Join-Path $projectRoot "target\jpackage-input"
 $resourceDir = Join-Path $projectRoot "src\main\jpackage"
+$repoRoot = Split-Path -Parent $projectRoot
+$obsSourceDir = Join-Path $repoRoot "obs"
 if (Test-Path $packageDir) {
     Remove-Item -LiteralPath $packageDir -Recurse -Force
 }
 New-Item -ItemType Directory -Force -Path $packageDir | Out-Null
 New-Item -ItemType Directory -Force -Path $inputDir | Out-Null
 Copy-Item -Path (Join-Path $projectRoot "target\mtgo-twitch-bridge.jar") -Destination $inputDir -Force
+$obsInputDir = Join-Path $inputDir "obs"
+if (Test-Path $obsInputDir) {
+    Remove-Item -LiteralPath $obsInputDir -Recurse -Force
+}
+if (Test-Path $obsSourceDir) {
+    New-Item -ItemType Directory -Force -Path $obsInputDir | Out-Null
+    Copy-Item -Path (Join-Path $obsSourceDir "*") -Destination $obsInputDir -Recurse -Force
+}
 $iconPath = Join-Path $projectRoot "src\main\resources\icons\bridge-icon.ico"
 
 $jpackageArgs = @(
@@ -62,6 +72,19 @@ if ($Type -eq "exe") {
 jpackage @jpackageArgs
 if ($LASTEXITCODE -ne 0) {
     throw "jpackage failed with exit code $LASTEXITCODE."
+}
+
+if ($Type -eq "app-image" -and (Test-Path $obsSourceDir)) {
+    $appImageDir = Join-Path $packageDir "MTGO Twitch Bridge"
+    if (Test-Path $appImageDir) {
+        $obsBundleDir = Join-Path $appImageDir "obs"
+        if (Test-Path $obsBundleDir) {
+            Remove-Item -LiteralPath $obsBundleDir -Recurse -Force
+        }
+        New-Item -ItemType Directory -Force -Path $obsBundleDir | Out-Null
+        Copy-Item -Path (Join-Path $obsSourceDir "*") -Destination $obsBundleDir -Recurse -Force
+        Write-Host "Bundled OBS launcher at: $obsBundleDir"
+    }
 }
 
 if ($Type -eq "exe") {

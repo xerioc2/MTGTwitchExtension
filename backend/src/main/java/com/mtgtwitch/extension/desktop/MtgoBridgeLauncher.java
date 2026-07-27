@@ -2,11 +2,14 @@ package com.mtgtwitch.extension.desktop;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mtgtwitch.extension.MtgoTwitchExtensionApplication;
+import com.mtgtwitch.extension.log.LogDiscoveryProgress;
 import com.mtgtwitch.extension.log.LogWatchStatus;
 import com.mtgtwitch.extension.relay.SupabaseRelayPublisher;
 import com.mtgtwitch.extension.scryfall.RemoteCardResolverClient;
 import com.sun.net.httpserver.HttpExchange;
 import com.sun.net.httpserver.HttpServer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.ConfigurableApplicationContext;
 
@@ -75,6 +78,7 @@ import javax.imageio.ImageIO;
 
 public class MtgoBridgeLauncher {
 
+    private static final Logger log = LoggerFactory.getLogger(MtgoBridgeLauncher.class);
     private static final String WINDOW_TITLE = "MTGO Twitch Bridge";
     private static final String APP_ICON_RESOURCE = "/icons/bridge-icon.png";
     private static final String MESSAGE = "Open MTGO first, then start the bridge. If MTGO updates or the log is not found, click Refresh Log.";
@@ -83,6 +87,7 @@ public class MtgoBridgeLauncher {
     private static final int MAX_PORT = 8090;
     private static final int TWITCH_CALLBACK_PORT = 8787;
     private static final String TWITCH_CALLBACK_PATH = "/callback";
+    private static final String QUIET_IF_RUNNING_ARG = "--quiet-if-running";
     private static final SecureRandom SECURE_RANDOM = new SecureRandom();
     private static final Path CONFIG_PATH = BridgeLocalConfigStore.CONFIG_PATH;
     private static final String TWITCH_LOGIN_KEY = "twitch.login";
@@ -107,6 +112,7 @@ public class MtgoBridgeLauncher {
     private JButton loginButton;
     private JButton logoutButton;
     private JButton refreshButton;
+    private JButton obsSetupButton;
     private JButton stopButton;
     private JCheckBox rememberLoginCheckbox;
     private JCheckBox autostartCheckbox;
@@ -118,6 +124,7 @@ public class MtgoBridgeLauncher {
     private TrayIcon trayIcon;
     private Image appIconImage;
     private Timer statusTimer;
+    private Timer discoveryProgressTimer;
     private ConfigurableApplicationContext applicationContext;
     private int serverPort = DEFAULT_PORT;
     private String websocketUrl = websocketUrl(DEFAULT_PORT);
@@ -132,6 +139,12 @@ public class MtgoBridgeLauncher {
     private void start(String[] args) {
         BridgeInstanceGuard.ScanResult portScan = scanServerPorts(args);
         if (portScan.status() == BridgeInstanceGuard.ScanStatus.BRIDGE_RUNNING) {
+            if (shouldExitQuietlyIfRunning(args, portScan)) {
+                log.info("MTGO Twitch Bridge is already running; quiet launch exiting.");
+                System.exit(0);
+                return;
+            }
+
             reportAlreadyRunning(portScan.port().orElse(DEFAULT_PORT));
             System.exit(1);
             return;
@@ -153,7 +166,23 @@ public class MtgoBridgeLauncher {
         setupTray();
         updateAuthUi();
         frame.setVisible(true);
+        startDiscoveryProgressTimer();
         startSpringBoot(withServerPort(args, serverPort));
+    }
+
+    static boolean shouldExitQuietlyIfRunning(String[] args, BridgeInstanceGuard.ScanResult portScan) {
+        return hasQuietIfRunningFlag(args)
+                && portScan != null
+                && portScan.status() == BridgeInstanceGuard.ScanStatus.BRIDGE_RUNNING;
+    }
+
+    static boolean hasQuietIfRunningFlag(String[] args) {
+        if (args == null || args.length == 0) {
+            return false;
+        }
+
+        return java.util.Arrays.stream(args)
+                .anyMatch(QUIET_IF_RUNNING_ARG::equalsIgnoreCase);
     }
 
     private BridgeInstanceGuard.ScanResult scanServerPorts(String[] args) {
@@ -241,6 +270,8 @@ public class MtgoBridgeLauncher {
         loginButton.addActionListener(event -> loginWithTwitch());
         logoutButton = new JButton("Log out");
         logoutButton.addActionListener(event -> logout());
+        obsSetupButton = new JButton("Set up OBS auto-launch");
+        obsSetupButton.addActionListener(event -> setupObsAutoLaunch());
         refreshButton = new JButton("Refresh Log");
         refreshButton.addActionListener(event -> refreshLog());
         stopButton = new JButton("Stop/Close");
@@ -249,6 +280,7 @@ public class MtgoBridgeLauncher {
         actions.add(rememberLoginCheckbox);
         actions.add(loginButton);
         actions.add(logoutButton);
+        actions.add(obsSetupButton);
         actions.add(refreshButton);
         actions.add(stopButton);
         root.add(actions, BorderLayout.SOUTH);
@@ -305,6 +337,50 @@ public class MtgoBridgeLauncher {
         }
 
         WindowsStartupRegistry.setPreference(CONFIG_PATH, autostartCheckbox.isSelected());
+    }
+
+    private void setupObsAutoLaunch() {
+        ObsAutoLaunchSetup.SetupResult result = ObsAutoLaunchSetup.installDefault();
+        switch (result.status()) {
+            case INSTALLED -> {
+                openInExplorer(result.scriptPath());
+                JOptionPane.showMessageDialog(
+                        frame,
+                        """
+                        OBS auto-launch script copied to:
+                        %s
+
+                        A folder window has been opened showing it. In OBS: Tools > Scripts > + > select mtgo-twitch-bridge-launcher.lua there. The bridge path will already be filled in -- just click OK.
+                        """.formatted(result.scriptPath()),
+                        WINDOW_TITLE,
+                        JOptionPane.INFORMATION_MESSAGE
+                );
+            }
+            case OBS_NOT_FOUND -> JOptionPane.showMessageDialog(
+                    frame,
+                    "OBS was not detected. Open OBS once, then try again.",
+                    WINDOW_TITLE,
+                    JOptionPane.INFORMATION_MESSAGE
+            );
+            case SCRIPT_NOT_FOUND, FAILED -> JOptionPane.showMessageDialog(
+                    frame,
+                    result.message(),
+                    WINDOW_TITLE,
+                    JOptionPane.WARNING_MESSAGE
+            );
+        }
+    }
+
+    private void openInExplorer(Path filePath) {
+        if (filePath == null) {
+            return;
+        }
+
+        try {
+            new ProcessBuilder("explorer.exe", "/select,\"" + filePath.toAbsolutePath() + "\"").start();
+        } catch (IOException exception) {
+            log.warn("Could not open Explorer to show the OBS auto-launch script.", exception);
+        }
     }
 
     private JLabel addStatusRow(JPanel panel, GridBagConstraints constraints, String label, String initialValue) {
@@ -394,6 +470,8 @@ public class MtgoBridgeLauncher {
 
     private void refreshLog() {
         setControlsEnabled(false);
+        latestStatus = new LogWatchStatus(null, false, "Scanning for MTGO log...");
+        updateStatus(latestStatus);
         HttpRequest request = HttpRequest.newBuilder(rescanUri(serverPort))
                 .POST(HttpRequest.BodyPublishers.noBody())
                 .build();
@@ -921,6 +999,43 @@ public class MtgoBridgeLauncher {
         updateTray(backendRunning && status.watching());
     }
 
+    private void startDiscoveryProgressTimer() {
+        if (discoveryProgressTimer != null) {
+            discoveryProgressTimer.stop();
+        }
+
+        discoveryProgressTimer = new Timer(500, event -> updateDiscoveryProgressStatus());
+        discoveryProgressTimer.start();
+    }
+
+    private void updateDiscoveryProgressStatus() {
+        if (logPathValue == null || logStatusValue == null) {
+            return;
+        }
+
+        LogDiscoveryProgress.Status progress = LogDiscoveryProgress.snapshot();
+        if (!shouldDisplayDiscoveryProgress(progress)) {
+            return;
+        }
+
+        logStatusValue.setText(progress.watching() ? "Found" : progress.scanning() ? "Scanning..." : "Not found");
+        logPathValue.setText(progress.message());
+        lastActivityValue.setText(resolveLastActivity(progress.path()));
+        updateTray(applicationContext != null && applicationContext.isActive() && progress.watching());
+    }
+
+    private boolean shouldDisplayDiscoveryProgress(LogDiscoveryProgress.Status progress) {
+        if (progress == null || progress.message() == null || progress.message().isBlank()) {
+            return false;
+        }
+
+        if (latestStatus.path() != null && latestStatus.watching()) {
+            return false;
+        }
+
+        return progress.scanning() || latestStatus.path() == null;
+    }
+
     private String resolveLastActivity(String pathText) {
         if (pathText == null || pathText.isBlank()) {
             return "Unknown";
@@ -1032,6 +1147,9 @@ public class MtgoBridgeLauncher {
         if (autostartCheckbox != null) {
             autostartCheckbox.setEnabled(enabled);
         }
+        if (obsSetupButton != null) {
+            obsSetupButton.setEnabled(enabled);
+        }
         if (addAccountButton != null) {
             addAccountButton.setEnabled(enabled);
         }
@@ -1120,6 +1238,10 @@ public class MtgoBridgeLauncher {
 
         if (statusTimer != null) {
             statusTimer.stop();
+        }
+
+        if (discoveryProgressTimer != null) {
+            discoveryProgressTimer.stop();
         }
 
         if (trayIcon != null) {
