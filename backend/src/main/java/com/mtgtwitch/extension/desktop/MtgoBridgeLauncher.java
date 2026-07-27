@@ -109,6 +109,7 @@ public class MtgoBridgeLauncher {
     private JButton refreshButton;
     private JButton stopButton;
     private JCheckBox rememberLoginCheckbox;
+    private JCheckBox autostartCheckbox;
     private DefaultListModel<String> mtgoAccountsModel;
     private JList<String> mtgoAccountsList;
     private JButton addAccountButton;
@@ -142,6 +143,7 @@ public class MtgoBridgeLauncher {
         }
 
         bridgeConfig = loadBridgeConfig().orElse(null);
+        WindowsStartupRegistry.reconcileStartupPreference(CONFIG_PATH);
         appIconImage = loadAppIcon();
         serverPort = portScan.port().getAsInt();
         websocketUrl = websocketUrl(serverPort);
@@ -230,6 +232,11 @@ public class MtgoBridgeLauncher {
 
         JPanel actions = new JPanel(new FlowLayout(FlowLayout.RIGHT));
         rememberLoginCheckbox = new JCheckBox("Remember login", true);
+        autostartCheckbox = new JCheckBox(
+                "Start automatically when Windows starts",
+                WindowsStartupRegistry.readPreference(CONFIG_PATH)
+        );
+        autostartCheckbox.addActionListener(event -> updateAutostartPreference());
         loginButton = new JButton("Login with Twitch");
         loginButton.addActionListener(event -> loginWithTwitch());
         logoutButton = new JButton("Log out");
@@ -238,6 +245,7 @@ public class MtgoBridgeLauncher {
         refreshButton.addActionListener(event -> refreshLog());
         stopButton = new JButton("Stop/Close");
         stopButton.addActionListener(event -> exitApplication());
+        actions.add(autostartCheckbox);
         actions.add(rememberLoginCheckbox);
         actions.add(loginButton);
         actions.add(logoutButton);
@@ -289,6 +297,14 @@ public class MtgoBridgeLauncher {
         updateAccountButtons();
 
         return accountsPanel;
+    }
+
+    private void updateAutostartPreference() {
+        if (autostartCheckbox == null) {
+            return;
+        }
+
+        WindowsStartupRegistry.setPreference(CONFIG_PATH, autostartCheckbox.isSelected());
     }
 
     private JLabel addStatusRow(JPanel panel, GridBagConstraints constraints, String label, String initialValue) {
@@ -875,6 +891,9 @@ public class MtgoBridgeLauncher {
         if (rememberLoginCheckbox != null) {
             rememberLoginCheckbox.setVisible(!authenticated);
         }
+        if (autostartCheckbox != null) {
+            autostartCheckbox.setSelected(WindowsStartupRegistry.readPreference(CONFIG_PATH));
+        }
         if (logoutMenuItem != null) {
             logoutMenuItem.setEnabled(authenticated);
         }
@@ -1009,6 +1028,9 @@ public class MtgoBridgeLauncher {
         }
         if (rememberLoginCheckbox != null) {
             rememberLoginCheckbox.setEnabled(enabled);
+        }
+        if (autostartCheckbox != null) {
+            autostartCheckbox.setEnabled(enabled);
         }
         if (addAccountButton != null) {
             addAccountButton.setEnabled(enabled);
