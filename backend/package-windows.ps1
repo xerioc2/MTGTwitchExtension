@@ -1,7 +1,8 @@
 param(
     [string]$Version = "0.0.2",
     [ValidateSet("exe", "app-image")]
-    [string]$Type = "exe"
+    [string]$Type = "exe",
+    [string]$OutputDir = "dist\windows-package"
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,7 +26,16 @@ if ($LASTEXITCODE -ne 0) {
     throw "Maven desktop package failed with exit code $LASTEXITCODE."
 }
 
-$packageDir = Join-Path $projectRoot "dist\windows-package"
+$distRoot = [System.IO.Path]::GetFullPath((Join-Path $projectRoot "dist"))
+$packageDir = if ([System.IO.Path]::IsPathRooted($OutputDir)) {
+    [System.IO.Path]::GetFullPath($OutputDir)
+} else {
+    [System.IO.Path]::GetFullPath((Join-Path $projectRoot $OutputDir))
+}
+$distPrefix = $distRoot.TrimEnd([System.IO.Path]::DirectorySeparatorChar) + [System.IO.Path]::DirectorySeparatorChar
+if (-not $packageDir.StartsWith($distPrefix, [System.StringComparison]::OrdinalIgnoreCase)) {
+    throw "OutputDir must resolve beneath the backend dist directory: $distRoot"
+}
 $inputDir = Join-Path $projectRoot "target\jpackage-input"
 $resourceDir = Join-Path $projectRoot "src\main\jpackage"
 $repoRoot = Split-Path -Parent $projectRoot
