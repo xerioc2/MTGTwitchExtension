@@ -94,7 +94,7 @@ overlay.html
 
 The relay functions live in `supabase/functions/`:
 
-- `publish-game-state` validates bridge publish tokens and broadcasts game state.
+- `publish-game-state` validates bridge publish tokens, persists the latest state, and broadcasts only changed state.
 - `issue-bridge-token` verifies Twitch login and issues a per-streamer bridge token.
 
 Deploy functions:
@@ -111,6 +111,10 @@ supabase secrets set SUPABASE_URL=<your-supabase-url>
 supabase secrets set SUPABASE_SERVICE_ROLE_KEY=<your-service-role-key>
 supabase secrets set TWITCH_CLIENT_ID=<your-twitch-client-id>
 ```
+
+During a frontend rollout, set `PUBLISH_LEGACY_LOGIN_TOPIC=true` only while the
+previous login-topic frontend is still active. Remove it after the numeric
+Twitch-channel frontend is released.
 
 Apply database migrations from `supabase/migrations/` before validating the relay flow.
 

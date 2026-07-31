@@ -2,6 +2,15 @@ import { Activity, BookOpen, ChevronDown, ChevronRight, CircleAlert, PanelRightC
 import { createClient } from '@supabase/supabase-js';
 import { Component, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import DebugPage from './DebugPage.jsx';
+import {
+  disconnectSupabaseRelay,
+  fetchLatestRelayGameState,
+  requestRelayOwnership,
+  resolveExtensionVisibility,
+  shouldApplyRelayGameState,
+  shouldConnectToSupabaseRelay,
+  shouldScheduleRelayReconnect
+} from './relayLifecycle.js';
 import { useScreenDetections } from './screenDetections/useScreenDetections.js';
 
 const runtimeBackendUrls = resolveRuntimeBackendUrls();
@@ -172,6 +181,9 @@ function ExtensionPanel({ isOverlay }) {
   const [rescanStatus, setRescanStatus] = useState('');
   const [isRescanning, setIsRescanning] = useState(false);
   const [isBroadcaster, setIsBroadcaster] = useState(false);
+  const [isExtensionVisible, setIsExtensionVisible] = useState(
+    () => document.visibilityState !== 'hidden'
+  );
   const [relayChannelId, setRelayChannelId] = useState(() => (
     window.Twitch?.ext?.onAuthorized ? '' : supabaseConfig.channelId
   ));
@@ -196,9 +208,37 @@ function ExtensionPanel({ isOverlay }) {
   const [failedCatalogIds, setFailedCatalogIds] = useState({});
   const [manaPoolPriceByName, setManaPoolPriceByName] = useState({});
   const fetchedManaPoolKeys = useRef(new Set());
+  const twitchCallbacksRegisteredRef = useRef(false);
+  const twitchVisibilityRef = useRef(undefined);
+  const relayBroadcastChannelRef = useRef(null);
+  const relayDisconnectPromiseRef = useRef(Promise.resolve());
+  const latestRelayGameStateRef = useRef(null);
+  const relayConnectionStateRef = useRef('connecting');
+  const relayErrorRef = useRef('');
+  const ownsRelayConnectionRef = useRef(false);
+  const [ownsRelayConnection, setOwnsRelayConnection] = useState(false);
   const [reconnectNonce, setReconnectNonce] = useState(0);
   const reconnectAttemptsRef = useRef(0);
   const activeSupabaseChannelId = shouldUseSupabaseRelay ? relayChannelId : null;
+
+  const applyRelayGameState = useCallback((nextGameState) => {
+    if (!shouldApplyRelayGameState(latestRelayGameStateRef.current, nextGameState)) {
+      return false;
+    }
+
+    latestRelayGameStateRef.current = nextGameState;
+    relayConnectionStateRef.current = 'connected';
+    relayErrorRef.current = '';
+    setGameState({ ...emptyGameState, ...nextGameState });
+    setConnectionState('connected');
+    setLastError('');
+    return true;
+  }, []);
+
+  const updateRelayOwnership = useCallback((ownsConnection) => {
+    ownsRelayConnectionRef.current = ownsConnection;
+    setOwnsRelayConnection(ownsConnection);
+  }, []);
 
   const fetchManaPoolPrice = useCallback(async (cardName) => {
     if (!manaPoolUrl(cardName)) {
@@ -332,9 +372,30 @@ function ExtensionPanel({ isOverlay }) {
     // capped backoff instead of freezing on stale data until a page refresh.
     let disposed = false;
     let reconnectTimer = null;
+    let supabase = null;
+
+    const broadcastToSiblingSurfaces = (message) => {
+      relayBroadcastChannelRef.current?.postMessage(message);
+    };
+
+    const updateRelayConnectionState = (nextConnectionState, error = '') => {
+      relayConnectionStateRef.current = nextConnectionState;
+      relayErrorRef.current = error;
+      setConnectionState(nextConnectionState);
+      setLastError(error);
+      broadcastToSiblingSurfaces({
+        type: 'connection-state',
+        connectionState: nextConnectionState,
+        error
+      });
+    };
 
     const scheduleReconnect = () => {
-      if (disposed || reconnectTimer !== null) {
+      if (!shouldScheduleRelayReconnect({
+        disposed,
+        reconnectPending: reconnectTimer !== null,
+        visible: !shouldUseSupabaseRelay || isExtensionVisible
+      })) {
         return;
       }
 
@@ -344,40 +405,94 @@ function ExtensionPanel({ isOverlay }) {
     };
 
     if (shouldUseSupabaseRelay) {
-      if (!activeSupabaseChannelId) {
+      if (!shouldConnectToSupabaseRelay({
+        configured: shouldUseSupabaseRelay,
+        channelId: activeSupabaseChannelId,
+        visible: isExtensionVisible,
+        ownsConnection: ownsRelayConnection
+      })) {
         return undefined;
       }
 
-      const supabase = createClient(supabaseConfig.url, supabaseConfig.anonKey);
-      const channel = supabase.channel(`game-state:${activeSupabaseChannelId}`);
+      const connect = async () => {
+        try {
+          await relayDisconnectPromiseRef.current.catch(() => {});
+          if (disposed) {
+            return;
+          }
 
-      channel
-        .on('broadcast', { event: 'game-state' }, (message) => {
-          const nextGameState = message.payload?.payload ?? message.payload;
-          setGameState({ ...emptyGameState, ...nextGameState });
-          setLastError('');
-        })
-        .subscribe((status) => {
-          if (status === 'SUBSCRIBED') {
-            reconnectAttemptsRef.current = 0;
-            setConnectionState('connected');
-            setLastError('');
-          } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
-            setConnectionState('error');
-            setLastError(`Supabase relay ${status.toLowerCase().replace('_', ' ')}. Reconnecting...`);
-            scheduleReconnect();
-          } else if (status === 'CLOSED') {
-            setConnectionState('disconnected');
+          supabase = createClient(supabaseConfig.url, supabaseConfig.anonKey, {
+            auth: {
+              autoRefreshToken: false,
+              detectSessionInUrl: false,
+              persistSession: false
+            }
+          });
+          const channel = supabase.channel(`game-state:${activeSupabaseChannelId}`);
+
+          channel
+            .on('broadcast', { event: 'game-state' }, (message) => {
+              if (disposed) {
+                return;
+              }
+
+              const nextGameState = message.payload?.payload ?? message.payload;
+              if (applyRelayGameState(nextGameState)) {
+                broadcastToSiblingSurfaces({ type: 'game-state', payload: nextGameState });
+              }
+            })
+            .subscribe((status) => {
+              if (disposed) {
+                return;
+              }
+
+              if (status === 'SUBSCRIBED') {
+                reconnectAttemptsRef.current = 0;
+                updateRelayConnectionState('connected');
+              } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+                updateRelayConnectionState(
+                  'error',
+                  `Supabase relay ${status.toLowerCase().replace('_', ' ')}. Reconnecting...`
+                );
+                scheduleReconnect();
+              } else if (status === 'CLOSED') {
+                updateRelayConnectionState('disconnected');
+                scheduleReconnect();
+              }
+            });
+
+          const persistedGameState = await fetchLatestRelayGameState({
+            supabaseUrl: supabaseConfig.url,
+            anonKey: supabaseConfig.anonKey,
+            channelId: activeSupabaseChannelId
+          });
+          if (!disposed && persistedGameState && applyRelayGameState(persistedGameState)) {
+            broadcastToSiblingSurfaces({ type: 'game-state', payload: persistedGameState });
+          }
+        } catch (error) {
+          if (!disposed) {
+            updateRelayConnectionState(
+              'error',
+              error instanceof Error ? error.message : 'Supabase relay connection failed.'
+            );
             scheduleReconnect();
           }
-        });
+        }
+      };
+
+      void connect();
 
       return () => {
         disposed = true;
         if (reconnectTimer !== null) {
           window.clearTimeout(reconnectTimer);
         }
-        supabase.removeChannel(channel);
+        if (supabase) {
+          const previousCleanup = relayDisconnectPromiseRef.current;
+          relayDisconnectPromiseRef.current = previousCleanup
+            .catch(() => {})
+            .then(() => disconnectSupabaseRelay(supabase));
+        }
       };
     }
 
@@ -424,7 +539,72 @@ function ExtensionPanel({ isOverlay }) {
       }
       socket.close();
     };
-  }, [activeSupabaseChannelId, reconnectNonce]);
+  }, [
+    activeSupabaseChannelId,
+    applyRelayGameState,
+    isExtensionVisible,
+    ownsRelayConnection,
+    reconnectNonce
+  ]);
+
+  useEffect(() => {
+    if (!shouldUseSupabaseRelay || !activeSupabaseChannelId || !isExtensionVisible) {
+      setOwnsRelayConnection(false);
+      return undefined;
+    }
+
+    setConnectionState('connecting');
+    let canCoordinateSurfaces = Boolean(window.BroadcastChannel && navigator.locks?.request);
+    let relayBroadcastChannel = null;
+    if (canCoordinateSurfaces) {
+      try {
+        relayBroadcastChannel = new window.BroadcastChannel(
+          `mtgtwitch-relay:${activeSupabaseChannelId}`
+        );
+      } catch {
+        canCoordinateSurfaces = false;
+      }
+    }
+    relayBroadcastChannelRef.current = relayBroadcastChannel;
+
+    if (relayBroadcastChannel) {
+      relayBroadcastChannel.addEventListener('message', (event) => {
+        if (event.data?.type === 'game-state') {
+          applyRelayGameState(event.data.payload);
+        } else if (event.data?.type === 'connection-state') {
+          relayConnectionStateRef.current = event.data.connectionState;
+          relayErrorRef.current = event.data.error ?? '';
+          setConnectionState(event.data.connectionState);
+          setLastError(event.data.error ?? '');
+        } else if (event.data?.type === 'request-state' && ownsRelayConnectionRef.current) {
+          if (latestRelayGameStateRef.current) {
+            relayBroadcastChannel.postMessage({
+              type: 'game-state',
+              payload: latestRelayGameStateRef.current
+            });
+          }
+          relayBroadcastChannel.postMessage({
+            type: 'connection-state',
+            connectionState: relayConnectionStateRef.current,
+            error: relayErrorRef.current
+          });
+        }
+      });
+      relayBroadcastChannel.postMessage({ type: 'request-state' });
+    }
+
+    const releaseOwnership = requestRelayOwnership({
+      lockManager: canCoordinateSurfaces ? navigator.locks : null,
+      lockName: `mtgtwitch-relay-owner:${activeSupabaseChannelId}`,
+      onOwnershipChange: updateRelayOwnership
+    });
+
+    return () => {
+      releaseOwnership(Promise.resolve().then(() => relayDisconnectPromiseRef.current));
+      relayBroadcastChannelRef.current = null;
+      relayBroadcastChannel?.close();
+    };
+  }, [activeSupabaseChannelId, applyRelayGameState, isExtensionVisible, updateRelayOwnership]);
 
   const zoneCards = useMemo(() => {
     const nextZoneCards = {};
@@ -567,18 +747,45 @@ function ExtensionPanel({ isOverlay }) {
   });
 
   useEffect(() => {
-    if (window.Twitch?.ext?.onAuthorized) {
-      window.Twitch.ext.onAuthorized((auth) => {
-        setIsBroadcaster(auth.role === 'broadcaster');
-        if (auth.channelId) {
-          setRelayChannelId(String(auth.channelId));
-        }
-      });
-    } else {
+    const twitchExtension = window.Twitch?.ext;
+    const handleDocumentVisibility = () => {
+      setIsExtensionVisible(resolveExtensionVisibility({
+        documentVisible: document.visibilityState !== 'hidden',
+        twitchVisible: twitchVisibilityRef.current
+      }));
+    };
+    document.addEventListener('visibilitychange', handleDocumentVisibility);
+
+    if (!twitchExtension?.onAuthorized) {
       // Local dev outside Twitch sandbox: keep broadcaster tools reachable.
       setIsBroadcaster(true);
       setRelayChannelId(supabaseConfig.channelId);
+      return () => document.removeEventListener('visibilitychange', handleDocumentVisibility);
     }
+
+    if (twitchCallbacksRegisteredRef.current) {
+      return () => document.removeEventListener('visibilitychange', handleDocumentVisibility);
+    }
+    twitchCallbacksRegisteredRef.current = true;
+
+    twitchExtension.onAuthorized((auth) => {
+      setIsBroadcaster(twitchExtension.viewer?.role === 'broadcaster');
+      if (auth.channelId) {
+        setRelayChannelId(String(auth.channelId));
+      }
+    });
+
+    if (twitchExtension.onVisibilityChanged) {
+      twitchExtension.onVisibilityChanged((isVisible) => {
+        twitchVisibilityRef.current = Boolean(isVisible);
+        handleDocumentVisibility();
+      });
+    } else {
+      twitchVisibilityRef.current = true;
+      handleDocumentVisibility();
+    }
+
+    return () => document.removeEventListener('visibilitychange', handleDocumentVisibility);
   }, []);
 
   useEffect(() => {

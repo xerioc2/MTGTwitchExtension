@@ -1,15 +1,19 @@
+import {
+  relayChannelIds,
+  stableGameStateJson,
+  type StreamerRelayRow,
+} from "./relay-state.ts";
+
 const SUPABASE_URL = Deno.env.get("SUPABASE_URL") ?? "";
-const SUPABASE_ADMIN_KEY = Deno.env.get("MTGO_SUPABASE_SECRET_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const SUPABASE_ADMIN_KEY = Deno.env.get("MTGO_SUPABASE_SECRET_KEY") ??
+  Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? "";
+const PUBLISH_LEGACY_LOGIN_TOPIC =
+  Deno.env.get("PUBLISH_LEGACY_LOGIN_TOPIC") === "true";
 const GAME_STATE_EVENT = "game-state";
 
 type PublishRequest = {
   channelId?: string;
   gameState?: unknown;
-};
-
-type StreamerRelayRow = {
-  twitch_user_id: string;
-  twitch_login: string;
 };
 
 Deno.serve(async (request) => {
@@ -40,8 +44,11 @@ Deno.serve(async (request) => {
     return json({ error: "Invalid JSON" }, 400);
   }
 
-  if (payload.gameState == null) {
-    return json({ error: "gameState is required" }, 400);
+  if (
+    !payload.gameState || typeof payload.gameState !== "object" ||
+    Array.isArray(payload.gameState)
+  ) {
+    return json({ error: "gameState must be an object" }, 400);
   }
 
   const relay = await findStreamerRelay(tokenHash);
@@ -49,33 +56,67 @@ Deno.serve(async (request) => {
     return json({ error: "Unauthorized" }, 401);
   }
 
-  const twitchUserChannelId = sanitizeChannelId(relay.twitch_user_id);
-  const twitchLoginChannelId = sanitizeChannelId(relay.twitch_login);
-  const channelIds = Array.from(new Set([twitchUserChannelId, twitchLoginChannelId].filter(Boolean)));
+  const channelIds = relayChannelIds(relay, PUBLISH_LEGACY_LOGIN_TOPIC);
   if (channelIds.length === 0) {
     return json({ error: "Invalid streamer relay channel" }, 500);
   }
 
-  const response = await fetch(`${SUPABASE_URL.replace(/\/+$/, "")}/realtime/v1/api/broadcast`, {
-    method: "POST",
-    headers: {
-      "content-type": "application/json",
-      ...supabaseHeaders()
+  const contentHash = await sha256Hex(
+    stableGameStateJson(payload.gameState as Record<string, unknown>),
+  );
+  const changed = await persistLatestGameState(
+    channelIds[0],
+    payload.gameState,
+    contentHash,
+  );
+  if (changed == null) {
+    return json({ error: "Failed to persist latest game state" }, 502);
+  }
+  if (!changed) {
+    return json({ ok: true, channelIds, broadcast: false, deduplicated: true });
+  }
+
+  const response = await fetch(
+    `${SUPABASE_URL.replace(/\/+$/, "")}/realtime/v1/api/broadcast`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...supabaseHeaders(),
+      },
+      body: JSON.stringify({
+        messages: channelIds.map((channelId) => ({
+          topic: `game-state:${channelId}`,
+          event: GAME_STATE_EVENT,
+          payload: payload.gameState,
+        })),
+      }),
     },
-    body: JSON.stringify({
-      messages: channelIds.map((channelId) => ({
-        topic: `game-state:${channelId}`,
-        event: GAME_STATE_EVENT,
-        payload: payload.gameState
-      }))
-    })
-  });
+  );
 
   if (!response.ok) {
     return json({ error: "Failed to publish game state" }, 502);
   }
 
-  return json({ ok: true, channelIds });
+  const markedPublished = await markLatestGameStatePublished(
+    channelIds[0],
+    contentHash,
+  );
+  if (!markedPublished) {
+    console.warn(
+      `Broadcast succeeded but its persisted marker was not updated for channel ${
+        channelIds[0]
+      }.`,
+    );
+  }
+
+  return json({
+    ok: true,
+    channelIds,
+    broadcast: true,
+    deduplicated: false,
+    markedPublished,
+  });
 });
 
 function bearerToken(request: Request) {
@@ -88,14 +129,17 @@ async function findStreamerRelay(bridgeTokenHash: string) {
     bridge_token_hash: `eq.${bridgeTokenHash}`,
     revoked_at: "is.null",
     select: "twitch_user_id,twitch_login",
-    limit: "1"
+    limit: "1",
   });
 
-  const response = await fetch(`${SUPABASE_URL.replace(/\/+$/, "")}/rest/v1/streamer_relays?${params}`, {
-    headers: {
-      ...supabaseHeaders()
-    }
-  });
+  const response = await fetch(
+    `${SUPABASE_URL.replace(/\/+$/, "")}/rest/v1/streamer_relays?${params}`,
+    {
+      headers: {
+        ...supabaseHeaders(),
+      },
+    },
+  );
 
   if (!response.ok) {
     return null;
@@ -108,20 +152,23 @@ async function findStreamerRelay(bridgeTokenHash: string) {
 async function revokeStreamerRelay(bridgeTokenHash: string) {
   const params = new URLSearchParams({
     bridge_token_hash: `eq.${bridgeTokenHash}`,
-    revoked_at: "is.null"
+    revoked_at: "is.null",
   });
 
-  const response = await fetch(`${SUPABASE_URL.replace(/\/+$/, "")}/rest/v1/streamer_relays?${params}`, {
-    method: "PATCH",
-    headers: {
-      "content-type": "application/json",
-      "prefer": "return=minimal",
-      ...supabaseHeaders()
+  const response = await fetch(
+    `${SUPABASE_URL.replace(/\/+$/, "")}/rest/v1/streamer_relays?${params}`,
+    {
+      method: "PATCH",
+      headers: {
+        "content-type": "application/json",
+        "prefer": "return=minimal",
+        ...supabaseHeaders(),
+      },
+      body: JSON.stringify({
+        revoked_at: new Date().toISOString(),
+      }),
     },
-    body: JSON.stringify({
-      revoked_at: new Date().toISOString()
-    })
-  });
+  );
 
   if (!response.ok) {
     return json({ error: "Failed to revoke bridge token" }, 502);
@@ -130,8 +177,63 @@ async function revokeStreamerRelay(bridgeTokenHash: string) {
   return json({ ok: true });
 }
 
+async function persistLatestGameState(
+  channelId: string,
+  gameState: unknown,
+  contentHash: string,
+) {
+  const response = await fetch(
+    `${SUPABASE_URL.replace(/\/+$/, "")}/rest/v1/rpc/upsert_latest_game_state`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...supabaseHeaders(),
+      },
+      body: JSON.stringify({
+        p_channel_id: channelId,
+        p_game_state: gameState,
+        p_content_hash: contentHash,
+      }),
+    },
+  );
+
+  if (!response.ok) {
+    return null;
+  }
+
+  return await response.json() as boolean;
+}
+
+async function markLatestGameStatePublished(
+  channelId: string,
+  contentHash: string,
+) {
+  const response = await fetch(
+    `${
+      SUPABASE_URL.replace(/\/+$/, "")
+    }/rest/v1/rpc/mark_latest_game_state_published`,
+    {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...supabaseHeaders(),
+      },
+      body: JSON.stringify({
+        p_channel_id: channelId,
+        p_content_hash: contentHash,
+      }),
+    },
+  );
+
+  return response.ok && await response.json() as boolean;
+}
+
 async function sha256Hex(value: string) {
-  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  const digest = await crypto.subtle.digest(
+    "SHA-256",
+    new TextEncoder().encode(value),
+  );
   return bytesToHex(new Uint8Array(digest));
 }
 
@@ -141,18 +243,9 @@ function bytesToHex(bytes: Uint8Array) {
     .join("");
 }
 
-function sanitizeChannelId(channelId: unknown) {
-  if (typeof channelId !== "string") {
-    return "";
-  }
-
-  const trimmed = channelId.trim().toLowerCase();
-  return /^[a-z0-9_]{3,32}$/.test(trimmed) ? trimmed : "";
-}
-
 function supabaseHeaders() {
   const headers: Record<string, string> = {
-    "apikey": SUPABASE_ADMIN_KEY
+    "apikey": SUPABASE_ADMIN_KEY,
   };
 
   headers.authorization = `Bearer ${SUPABASE_ADMIN_KEY}`;
@@ -164,7 +257,7 @@ function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
     headers: {
-      "content-type": "application/json"
-    }
+      "content-type": "application/json",
+    },
   });
 }

@@ -28,7 +28,7 @@ When `SUPABASE_RELAY_FUNCTION_URL` is configured, the bridge posts:
 }
 ```
 
-The Edge Function validates `Authorization: Bearer <bridge token>` by hashing it and looking up an active row in `streamer_relays`. It publishes to `game-state:{twitch_login}` using the service role key that stays inside Supabase.
+The Edge Function validates `Authorization: Bearer <bridge token>` by hashing it and looking up an active row in `streamer_relays`. It atomically stores the latest state in `latest_game_states` and publishes changed content to `game-state:{twitch_user_id}` using the service role key that stays inside Supabase. Timestamp-only duplicates refresh liveness at most once every 30 seconds and do not broadcast.
 
 This removes the service role key from the streamer PC and avoids trusting channel IDs sent by the bridge.
 
@@ -61,7 +61,7 @@ It verifies the Twitch access token with `GET https://api.twitch.tv/helix/users`
 }
 ```
 
-The raw bridge token is never stored in Supabase. `publish-game-state` validates the SHA-256 token hash against `streamer_relays` and uses the stored `twitch_login` as the authoritative broadcast channel.
+The raw bridge token is never stored in Supabase. `publish-game-state` validates the SHA-256 token hash against `streamer_relays` and uses the stored numeric `twitch_user_id` as the authoritative broadcast channel.
 
 The bridge should open a browser-based Twitch OAuth login flow:
 
@@ -74,6 +74,21 @@ The bridge should open a browser-based Twitch OAuth login flow:
    - scoped bridge token
    - relay function URL
 6. The Twitch Extension subscribes to `game-state:{channelId}`.
+
+On viewer load, the elected frontend relay owner also reads the fresh row from
+`latest_game_states`. This gives new viewers an immediate state without using
+repeated broadcasts as replay. Same-origin panel/overlay instances share that
+state through `BroadcastChannel`; only one owns the Supabase socket.
+
+## Safe Numeric-Channel Rollout
+
+1. Apply the `latest_game_states` migration.
+2. Set `PUBLISH_LEGACY_LOGIN_TOPIC=true` and deploy `publish-game-state` while the old frontend is active.
+3. Release and verify the numeric-channel frontend.
+4. Remove `PUBLISH_LEGACY_LOGIN_TOPIC` (or set it to `false`) and redeploy the function.
+
+The default is `false`. The login topic exists only as a temporary rollback aid;
+leaving it enabled permanently doubles each changed-state broadcast.
 
 The token issuer stores token metadata in:
 

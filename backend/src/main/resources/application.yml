@@ -42,4 +42,7 @@ supabase:
   relay-function-url: ${SUPABASE_RELAY_FUNCTION_URL:}
   card-resolver-function-url: ${SUPABASE_CARD_RESOLVER_FUNCTION_URL:}
   bridge-publish-token: ${BRIDGE_PUBLISH_TOKEN:}
+  publish-min-interval: ${SUPABASE_PUBLISH_MIN_INTERVAL:PT1S}
+  publish-heartbeat-interval: ${SUPABASE_PUBLISH_HEARTBEAT_INTERVAL:PT15S}
+  metrics-log-interval: ${SUPABASE_METRICS_LOG_INTERVAL:PT5M}
   issue-token-url: ${SUPABASE_ISSUE_TOKEN_URL:https://lgzmxstmqzwjbmurstye.supabase.co/functions/v1/issue-bridge-token}

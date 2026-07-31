@@ -9,7 +9,8 @@
     "build:v2-screen-hover": "node scripts/build-v2-screen-hover.mjs",
     "package:v2-screen-hover": "node scripts/package-v2-screen-hover.mjs",
     "preview": "vite preview",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "test": "node --test src/relayLifecycle.test.js"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.106.2",

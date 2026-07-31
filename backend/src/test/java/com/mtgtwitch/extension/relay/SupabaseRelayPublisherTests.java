@@ -1,6 +1,7 @@
 package com.mtgtwitch.extension.relay;
 
 import com.mtgtwitch.extension.gamestate.GameState;
+import com.mtgtwitch.extension.gamestate.GameStateFingerprint;
 import org.junit.jupiter.api.Test;
 import org.springframework.boot.test.web.client.MockServerRestTemplateCustomizer;
 import org.springframework.boot.web.client.RestTemplateBuilder;
@@ -12,6 +13,7 @@ import java.time.Instant;
 import java.util.List;
 
 import static org.hamcrest.Matchers.containsString;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.springframework.test.web.client.ExpectedCount.never;
 import static org.springframework.test.web.client.ExpectedCount.once;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
@@ -42,9 +44,12 @@ class SupabaseRelayPublisherTests {
                 .andExpect(content().string(containsString("\"gameState\"")))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
-        publisher.publish(emptyGameState());
-
-        server.verify();
+        try {
+            publisher.publish(emptyGameState());
+            server.verify();
+        } finally {
+            publisher.close();
+        }
     }
 
     @Test
@@ -60,9 +65,12 @@ class SupabaseRelayPublisherTests {
         );
         MockRestServiceServer server = customizer.getServer();
 
-        publisher.publish(emptyGameState());
-
-        server.verify();
+        try {
+            publisher.publish(emptyGameState());
+            server.verify();
+        } finally {
+            publisher.close();
+        }
     }
 
     @Test
@@ -82,9 +90,12 @@ class SupabaseRelayPublisherTests {
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
         server.expect(never(), requestTo("https://example.supabase.co/realtime/v1/api/broadcast"));
 
-        publisher.publish(emptyGameState());
-
-        server.verify();
+        try {
+            publisher.publish(emptyGameState());
+            server.verify();
+        } finally {
+            publisher.close();
+        }
     }
 
     @Test
@@ -108,15 +119,122 @@ class SupabaseRelayPublisherTests {
                 .andExpect(content().string(containsString("\"event\":\"game-state\"")))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
-        publisher.publish(emptyGameState());
+        try {
+            publisher.publish(emptyGameState());
+            server.verify();
+        } finally {
+            publisher.close();
+        }
+    }
 
-        server.verify();
+    @Test
+    void coalescesRapidChangesAndPublishesTheLatestState() {
+        MockServerRestTemplateCustomizer customizer = new MockServerRestTemplateCustomizer();
+        SupabaseRelayPublisher publisher = new SupabaseRelayPublisher(
+                new RestTemplateBuilder(customizer),
+                "https://example.supabase.co",
+                "",
+                "xerioc2",
+                "https://example.supabase.co/functions/v1/publish-game-state",
+                "bridge-token",
+                java.time.Duration.ofMillis(75)
+        );
+        MockRestServiceServer server = customizer.getServer();
+
+        server.expect(once(), requestTo("https://example.supabase.co/functions/v1/publish-game-state"))
+                .andExpect(content().string(containsString("\"battlefield\":[]")))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+        server.expect(once(), requestTo("https://example.supabase.co/functions/v1/publish-game-state"))
+                .andExpect(content().string(containsString("\"battlefield\":[\"Counterspell\"]")))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+        try {
+            publisher.publish(gameStateWithBattlefield(List.of()));
+            publisher.publish(gameStateWithBattlefield(List.of("Lightning Bolt")));
+            publisher.publish(gameStateWithBattlefield(List.of("Counterspell")));
+
+            server.verify(java.time.Duration.ofSeconds(2));
+            assertEquals(3, publisher.metricsSnapshot().observedUpdates());
+            assertEquals(1, publisher.metricsSnapshot().coalescedUpdates());
+            assertEquals(2, publisher.metricsSnapshot().successfulPublishes());
+        } finally {
+            publisher.close();
+        }
+    }
+
+    @Test
+    void skipsTimestampOnlyChangesButKeepsAnIndependentHeartbeat() {
+        MockServerRestTemplateCustomizer customizer = new MockServerRestTemplateCustomizer();
+        SupabaseRelayPublisher publisher = new SupabaseRelayPublisher(
+                new RestTemplateBuilder(customizer),
+                "https://example.supabase.co",
+                "",
+                "xerioc2",
+                "https://example.supabase.co/functions/v1/publish-game-state",
+                "bridge-token",
+                java.time.Duration.ZERO,
+                java.time.Duration.ofMillis(50)
+        );
+        MockRestServiceServer server = customizer.getServer();
+
+        server.expect(org.springframework.test.web.client.ExpectedCount.times(2),
+                        requestTo("https://example.supabase.co/functions/v1/publish-game-state"))
+                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
+
+        try {
+            GameState firstState = gameStateWithBattlefield(
+                    List.of("Lightning Bolt"),
+                    Instant.parse("2026-05-31T00:00:00Z")
+            );
+            GameState timestampOnlyChange = gameStateWithBattlefield(
+                    List.of("Lightning Bolt"),
+                    Instant.parse("2026-05-31T00:00:01Z")
+            );
+            publisher.publish(firstState);
+            publisher.publish(timestampOnlyChange);
+
+            server.verify(java.time.Duration.ofSeconds(2));
+            assertEquals(2, publisher.metricsSnapshot().observedUpdates());
+            assertEquals(1, publisher.metricsSnapshot().deduplicatedUpdates());
+            assertEquals(1, publisher.metricsSnapshot().heartbeatPublishes());
+        } finally {
+            publisher.close();
+        }
+    }
+
+    @Test
+    void fingerprintTracksEveryGameStateFieldExceptUpdatedAt() {
+        GameState firstState = gameStateWithBattlefield(
+                List.of("Lightning Bolt"),
+                Instant.parse("2026-05-31T00:00:00Z")
+        );
+        GameState timestampOnlyChange = gameStateWithBattlefield(
+                List.of("Lightning Bolt"),
+                Instant.parse("2026-05-31T00:00:01Z")
+        );
+
+        assertEquals(
+                GameState.class.getRecordComponents().length - 1,
+                GameStateFingerprint.from(firstState).values().size()
+        );
+        assertEquals(
+                GameStateFingerprint.from(firstState),
+                GameStateFingerprint.from(timestampOnlyChange)
+        );
     }
 
     private GameState emptyGameState() {
+        return gameStateWithBattlefield(List.of());
+    }
+
+    private GameState gameStateWithBattlefield(List<String> battlefield) {
+        return gameStateWithBattlefield(battlefield, Instant.parse("2026-05-31T00:00:00Z"));
+    }
+
+    private GameState gameStateWithBattlefield(List<String> battlefield, Instant updatedAt) {
         return new GameState(
                 List.of(),
-                List.of(),
+                battlefield,
                 List.of(),
                 List.of(),
                 List.of(),
@@ -131,7 +249,7 @@ class SupabaseRelayPublisherTests {
                 List.of(),
                 List.of(),
                 List.of(),
-                Instant.parse("2026-05-31T00:00:00Z")
+                updatedAt
         );
     }
 }
