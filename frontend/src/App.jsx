@@ -937,18 +937,45 @@ function ExtensionPanel({ isOverlay }) {
     }
 
     try {
+      const saveWindow = window.open('', '_blank', 'popup,width=460,height=260');
+      if (!saveWindow) {
+        setDeckExportCopyStatus('Allow popups to save');
+        return;
+      }
+
       const file = new Blob([deckExportText], { type: 'text/plain;charset=utf-8' });
       const downloadUrl = URL.createObjectURL(file);
-      const download = document.createElement('a');
       const gameSuffix = gameState.gameId ? `-${gameState.gameId}` : '';
+      const filename = `magiccontent-deck${gameSuffix}.txt`;
+      const style = saveWindow.document.createElement('style');
+      style.textContent = `
+        body { margin: 0; min-height: 100vh; display: grid; place-items: center;
+          background: #0e0e10; color: #efeff1; font-family: sans-serif; }
+        main { width: min(360px, calc(100% - 40px)); text-align: center; }
+        h1 { margin: 0 0 10px; font-size: 1.15rem; }
+        p { margin: 0 0 18px; color: #adadb8; font-size: 0.88rem; }
+        a { display: inline-block; padding: 9px 14px; border-radius: 4px;
+          background: #9147ff; color: white; font-weight: 700; text-decoration: none; }
+      `;
+      saveWindow.document.head.appendChild(style);
+      saveWindow.document.title = 'Save magiccontent decklist';
+
+      const content = saveWindow.document.createElement('main');
+      const title = saveWindow.document.createElement('h1');
+      title.textContent = 'Decklist ready';
+      const note = saveWindow.document.createElement('p');
+      note.textContent = 'Your browser should download the file. Use the button if it does not start automatically.';
+      const download = saveWindow.document.createElement('a');
       download.href = downloadUrl;
-      download.download = `magiccontent-deck${gameSuffix}.txt`;
-      download.style.display = 'none';
-      document.body.appendChild(download);
+      download.download = filename;
+      download.textContent = `Download ${filename}`;
+      content.append(title, note, download);
+      saveWindow.document.body.replaceChildren(content);
+      saveWindow.opener = null;
       download.click();
-      download.remove();
-      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
-      setDeckExportCopyStatus('Download started');
+
+      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 60_000);
+      setDeckExportCopyStatus('Save window opened');
     } catch {
       setDeckExportCopyStatus('Download failed');
     }
