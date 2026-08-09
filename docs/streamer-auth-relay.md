@@ -43,15 +43,22 @@ Implemented scaffold:
   - `SUPABASE_URL`
   - `SUPABASE_SERVICE_ROLE_KEY`
   - `TWITCH_CLIENT_ID`
+  - `TWITCH_CLIENT_SECRET`
 
-The token issuer accepts:
+The token issuer accepts the Twitch authorization code and PKCE verifier from the
+bridge's loopback callback:
 
-```http
-POST /functions/v1/issue-bridge-token
-Authorization: Bearer <twitch_access_token>
+```json
+{
+  "code": "authorization-code",
+  "codeVerifier": "pkce-verifier",
+  "redirectUri": "http://localhost:17836/callback"
+}
 ```
 
-It verifies the Twitch access token with `GET https://api.twitch.tv/helix/users`, generates a random bridge token, stores only the SHA-256 hash in `streamer_relays`, and returns the raw token once:
+The Edge Function exchanges the code with Twitch, verifies the resulting access
+token with `GET https://api.twitch.tv/helix/users`, generates a random bridge token,
+stores only the SHA-256 hash in `streamer_relays`, and returns the raw token once:
 
 ```json
 {
@@ -63,17 +70,17 @@ It verifies the Twitch access token with `GET https://api.twitch.tv/helix/users`
 
 The raw bridge token is never stored in Supabase. `publish-game-state` validates the SHA-256 token hash against `streamer_relays` and uses the stored numeric `twitch_user_id` as the authoritative broadcast channel.
 
-The bridge should open a browser-based Twitch OAuth login flow:
+The bridge uses this browser-based Twitch OAuth login flow:
 
 1. Streamer clicks `Login with Twitch` in the bridge.
-2. Twitch redirects to a hosted callback endpoint.
-3. The callback hands the Twitch access token to `issue-bridge-token`.
-4. The relay service verifies Twitch identity and issues a limited bridge publish token scoped to that Twitch channel.
+2. Twitch redirects to the bridge's temporary loopback callback on `localhost`.
+3. The bridge sends the authorization code, PKCE verifier, and callback URI to `issue-bridge-token`.
+4. The Edge Function performs the Twitch token exchange, verifies Twitch identity, and issues a limited bridge publish token scoped to that Twitch channel.
 5. The bridge stores only:
    - channel ID/name
    - scoped bridge token
    - relay function URL
-6. The Twitch Extension subscribes to `game-state:{channelId}`.
+6. The Twitch Extension subscribes to `game-state:{auth.channelId}` using Twitch's numeric channel ID.
 
 On viewer load, the elected frontend relay owner also reads the fresh row from
 `latest_game_states`. This gives new viewers an immediate state without using
@@ -118,6 +125,7 @@ Set secrets:
 supabase secrets set SUPABASE_URL=https://your-project.supabase.co
 supabase secrets set SUPABASE_SERVICE_ROLE_KEY=your_service_role_key
 supabase secrets set TWITCH_CLIENT_ID=your_twitch_client_id
+supabase secrets set TWITCH_CLIENT_SECRET=your_twitch_client_secret
 ```
 
 Bridge `.env.local` for Phase 1:

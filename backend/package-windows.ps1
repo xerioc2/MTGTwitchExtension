@@ -64,6 +64,7 @@ $jpackageArgs = @(
     "--description", "Local MTGO log bridge for the magiccontent Twitch Extension",
     "--input", $inputDir,
     "--main-jar", "mtgo-twitch-bridge.jar",
+    "--java-options", "--enable-native-access=ALL-UNNAMED",
     "--dest", $packageDir
 )
 

@@ -24,6 +24,20 @@ export function shouldApplyRelayGameState(currentState, nextState) {
   return nextUpdatedAt >= currentUpdatedAt;
 }
 
+export function mergeRelayDetectionRegions(currentState, payload) {
+  const detectionRegions = Array.isArray(payload)
+    ? payload
+    : payload?.detectionRegions;
+  if (!Array.isArray(detectionRegions)) {
+    return currentState;
+  }
+
+  return {
+    ...currentState,
+    detectionRegions
+  };
+}
+
 export async function fetchLatestRelayGameState({
   supabaseUrl,
   anonKey,

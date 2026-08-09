@@ -14,6 +14,7 @@ Spring Boot backend and Windows desktop bridge for the MTGO Twitch Extension.
 - Scryfall card resolution by MTGO catalog ID with multiverse fallback
 - Game state WebSocket endpoint at `/ws/game-state`
 - Swing desktop launcher at `com.mtgtwitch.extension.desktop.MtgoBridgeLauncher`
+- Disabled-by-default local OBS/screenshot detector documented in [`../docs/local-screen-detector.md`](../docs/local-screen-detector.md)
 - Actuator health/info endpoints
 
 The parser prefers the structured `Twitch Info|Game Play Status Update` payload when MTGO emits it,

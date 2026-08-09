@@ -160,9 +160,9 @@ or bytecode level:
 | App-image | 165,678,350 bytes (158.00 MiB) |
 | Installer | 79,002,624 bytes (75.34 MiB) |
 | Portable zip | 77,201,530 bytes (73.63 MiB) |
-| Candidate version | 0.0.13 |
-| App-image path | `backend/dist/java25-candidate/MTGO Twitch Bridge` |
-| Installer path | `backend/dist/java25-installer-candidate/MTGO Twitch Bridge-0.0.13.exe` |
+| Candidate version | 0.0.14 |
+| App-image path | `backend/dist/java25-live-candidate/MTGO Twitch Bridge` |
+| Installer path | `backend/dist/java25-live-installer/MTGO Twitch Bridge-0.0.14.exe` |
 
 The executable jar is 1,159,665 bytes (about 4.2 percent) larger than the Java
 21/Spring Boot 3.3 baseline. The isolated app-image is 75,947,726 bytes (about

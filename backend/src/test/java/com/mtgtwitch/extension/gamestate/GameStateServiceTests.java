@@ -36,27 +36,27 @@ class GameStateServiceTests {
     }
 
     @Test
-    void cardZoneEventAppliesOnlyToActiveGame() {
+    void cardZoneEventProvidesFallbackBeforeStructuredSnapshot() {
+        GameState fallbackState = gameStateService.apply(
+                new CardZoneEvent("Lightning Bolt", null, Zone.HAND, "raw")
+        );
+
+        assertThat(fallbackState.hand()).containsExactly("Lightning Bolt");
+        assertThat(fallbackState.handCards()).isEmpty();
+    }
+
+    @Test
+    void structuredSnapshotRemainsAuthoritativeOverNameOnlyZoneEvents() {
         gameStateService.apply(statusEvent(1001L, 2001L, 111001));
-        gameStateService.apply(statusEvent(1002L, 2002L, 222001));
 
-        gameStateService.apply(new CardZoneEvent("Lightning Bolt", null, Zone.HAND, "raw"));
+        GameState unchanged = gameStateService.apply(
+                new CardZoneEvent("Lightning Bolt", Zone.HAND, Zone.BATTLEFIELD, "raw")
+        );
 
-        GameState activeA = gameStateService.updateDeckCatalogIds(new DeckCatalogEvent(
-                1001L,
-                "local",
-                List.of(new DeckCard(900001, 4, false)),
-                "raw"
-        ));
-        assertThat(activeA.hand()).containsExactly("CatalogID 111001");
-
-        GameState activeB = gameStateService.updateDeckCatalogIds(new DeckCatalogEvent(
-                1002L,
-                "local",
-                List.of(new DeckCard(900002, 4, false)),
-                "raw"
-        ));
-        assertThat(activeB.hand()).containsExactly("CatalogID 222001", "Lightning Bolt");
+        assertThat(unchanged.hand()).containsExactly("CatalogID 111001");
+        assertThat(unchanged.handCards()).extracting(GameCard::catalogId).containsExactly(111001);
+        assertThat(unchanged.battlefield()).isEmpty();
+        assertThat(unchanged.battlefieldCards()).isEmpty();
     }
 
     @Test

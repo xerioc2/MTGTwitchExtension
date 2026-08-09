@@ -28,14 +28,13 @@ Get-Content -LiteralPath $envPath | ForEach-Object {
     [Environment]::SetEnvironmentVariable($name, $value, "Process")
 }
 
-if (-not $env:SUPABASE_RELAY_FUNCTION_URL -and -not $env:SUPABASE_SERVICE_ROLE_KEY) {
-    Write-Warning "Neither SUPABASE_RELAY_FUNCTION_URL nor SUPABASE_SERVICE_ROLE_KEY is set. Relay publishing will be disabled."
+if (-not $env:SUPABASE_RELAY_FUNCTION_URL) {
+    Write-Warning "SUPABASE_RELAY_FUNCTION_URL is not set. Relay publishing will be disabled."
 }
 
 Write-Host "Loaded relay env from $envPath"
 Write-Host "SUPABASE_RELAY_FUNCTION_URL present: $(if ($env:SUPABASE_RELAY_FUNCTION_URL) { 'yes' } else { 'no' })"
 Write-Host "BRIDGE_PUBLISH_TOKEN present: $(if ($env:BRIDGE_PUBLISH_TOKEN) { 'yes' } else { 'no' })"
-Write-Host "SUPABASE_SERVICE_ROLE_KEY present: $(if ($env:SUPABASE_SERVICE_ROLE_KEY) { 'yes' } else { 'no' })"
 Write-Host "SUPABASE_CHANNEL_ID: $($env:SUPABASE_CHANNEL_ID)"
 
 Set-Location $backendRoot

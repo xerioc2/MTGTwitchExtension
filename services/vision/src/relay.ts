@@ -5,13 +5,15 @@ export type PublishRegionsOptions = {
   supabaseUrl: string;
   serviceRoleKey: string;
   channelId: string;
+  fetchImpl?: typeof fetch;
 };
 
 export async function publishRegions(regions: DetectionRegion[], opts: PublishRegionsOptions): Promise<boolean> {
+  const fetchImpl = opts.fetchImpl ?? fetch;
   const bridgeUrl = opts.bridgeUrl?.trim();
   if (bridgeUrl) {
     try {
-      const response = await fetch(`${bridgeUrl.replace(/\/+$/, '')}/api/detection-regions`, {
+      const response = await fetchImpl(`${bridgeUrl.replace(/\/+$/, '')}/api/detection-regions`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -27,7 +29,7 @@ export async function publishRegions(regions: DetectionRegion[], opts: PublishRe
   }
 
   try {
-    const response = await fetch(`${opts.supabaseUrl.replace(/\/+$/, '')}/realtime/v1/api/broadcast`, {
+    const response = await fetchImpl(`${opts.supabaseUrl.replace(/\/+$/, '')}/realtime/v1/api/broadcast`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -37,7 +39,7 @@ export async function publishRegions(regions: DetectionRegion[], opts: PublishRe
       body: JSON.stringify({
         messages: [{
           topic: `game-state:${opts.channelId}`,
-          event: 'game-state',
+          event: 'detection-regions',
           payload: {
             detectionRegions: regions
           }

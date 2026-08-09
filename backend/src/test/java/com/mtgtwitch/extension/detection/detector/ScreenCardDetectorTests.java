@@ -3,6 +3,7 @@ package com.mtgtwitch.extension.detection.detector;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.mtgtwitch.extension.detection.DetectionRegion;
 import com.mtgtwitch.extension.detection.DetectionRegionService;
+import com.mtgtwitch.extension.detection.vision.LocalVisionScreenCardDetector;
 import com.mtgtwitch.extension.gamestate.GameCard;
 import com.mtgtwitch.extension.gamestate.GameState;
 import com.mtgtwitch.extension.gamestate.GameStateService;
@@ -18,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.Mockito.mock;
 
 class ScreenCardDetectorTests {
 
@@ -155,6 +157,7 @@ class ScreenCardDetectorTests {
                     gameStateService,
                     new MockScreenCardDetector(),
                     new ManualLayoutScreenCardDetector(),
+                    mock(LocalVisionScreenCardDetector.class),
                     detectionsEnabled,
                     detectorEnabled,
                     mode,

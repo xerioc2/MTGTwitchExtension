@@ -14,7 +14,6 @@ import java.util.List;
 
 import static org.hamcrest.Matchers.containsString;
 import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.springframework.test.web.client.ExpectedCount.never;
 import static org.springframework.test.web.client.ExpectedCount.once;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.header;
 import static org.springframework.test.web.client.match.MockRestRequestMatchers.method;
@@ -29,8 +28,6 @@ class SupabaseRelayPublisherTests {
         MockServerRestTemplateCustomizer customizer = new MockServerRestTemplateCustomizer();
         SupabaseRelayPublisher publisher = new SupabaseRelayPublisher(
                 new RestTemplateBuilder(customizer),
-                "https://example.supabase.co",
-                "",
                 "xerioc2",
                 "https://example.supabase.co/functions/v1/publish-game-state",
                 "bridge-token"
@@ -57,8 +54,6 @@ class SupabaseRelayPublisherTests {
         MockServerRestTemplateCustomizer customizer = new MockServerRestTemplateCustomizer();
         SupabaseRelayPublisher publisher = new SupabaseRelayPublisher(
                 new RestTemplateBuilder(customizer),
-                "https://example.supabase.co",
-                "",
                 "xerioc2",
                 "https://example.supabase.co/functions/v1/publish-game-state",
                 ""
@@ -74,12 +69,10 @@ class SupabaseRelayPublisherTests {
     }
 
     @Test
-    void doesNotUseDirectBroadcastWhenRelayFunctionIsConfigured() {
+    void alwaysUsesConfiguredRelayFunctionEndpoint() {
         MockServerRestTemplateCustomizer customizer = new MockServerRestTemplateCustomizer();
         SupabaseRelayPublisher publisher = new SupabaseRelayPublisher(
                 new RestTemplateBuilder(customizer),
-                "https://example.supabase.co",
-                "service-role-key",
                 "xerioc2",
                 "https://example.supabase.co/functions/v1/publish-game-state",
                 "bridge-token"
@@ -88,8 +81,6 @@ class SupabaseRelayPublisherTests {
 
         server.expect(once(), requestTo("https://example.supabase.co/functions/v1/publish-game-state"))
                 .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
-        server.expect(never(), requestTo("https://example.supabase.co/realtime/v1/api/broadcast"));
-
         try {
             publisher.publish(emptyGameState());
             server.verify();
@@ -99,25 +90,15 @@ class SupabaseRelayPublisherTests {
     }
 
     @Test
-    void fallsBackToDirectBroadcastWhenRelayFunctionIsBlankAndServiceRoleKeyIsSet() {
+    void doesNotPublishWhenRelayFunctionIsBlank() {
         MockServerRestTemplateCustomizer customizer = new MockServerRestTemplateCustomizer();
         SupabaseRelayPublisher publisher = new SupabaseRelayPublisher(
                 new RestTemplateBuilder(customizer),
-                "https://example.supabase.co",
-                "service-role-key",
                 "xerioc2",
                 "",
                 ""
         );
         MockRestServiceServer server = customizer.getServer();
-
-        server.expect(once(), requestTo("https://example.supabase.co/realtime/v1/api/broadcast"))
-                .andExpect(method(HttpMethod.POST))
-                .andExpect(header("Authorization", "Bearer service-role-key"))
-                .andExpect(header("apikey", "service-role-key"))
-                .andExpect(content().string(containsString("\"topic\":\"game-state:xerioc2\"")))
-                .andExpect(content().string(containsString("\"event\":\"game-state\"")))
-                .andRespond(withSuccess("{}", MediaType.APPLICATION_JSON));
 
         try {
             publisher.publish(emptyGameState());
@@ -132,8 +113,6 @@ class SupabaseRelayPublisherTests {
         MockServerRestTemplateCustomizer customizer = new MockServerRestTemplateCustomizer();
         SupabaseRelayPublisher publisher = new SupabaseRelayPublisher(
                 new RestTemplateBuilder(customizer),
-                "https://example.supabase.co",
-                "",
                 "xerioc2",
                 "https://example.supabase.co/functions/v1/publish-game-state",
                 "bridge-token",
@@ -167,8 +146,6 @@ class SupabaseRelayPublisherTests {
         MockServerRestTemplateCustomizer customizer = new MockServerRestTemplateCustomizer();
         SupabaseRelayPublisher publisher = new SupabaseRelayPublisher(
                 new RestTemplateBuilder(customizer),
-                "https://example.supabase.co",
-                "",
                 "xerioc2",
                 "https://example.supabase.co/functions/v1/publish-game-state",
                 "bridge-token",

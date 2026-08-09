@@ -34,8 +34,8 @@ public class RemoteCardResolverClient {
     ) {
         this(
                 restTemplateBuilder
-                        .setConnectTimeout(Duration.ofSeconds(3))
-                        .setReadTimeout(Duration.ofSeconds(6))
+                        .connectTimeout(Duration.ofSeconds(3))
+                        .readTimeout(Duration.ofSeconds(6))
                         .build(),
                 cardResolverFunctionUrl,
                 bridgePublishToken

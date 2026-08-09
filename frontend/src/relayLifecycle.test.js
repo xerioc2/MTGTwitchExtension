@@ -3,12 +3,32 @@ import test from 'node:test';
 import {
   disconnectSupabaseRelay,
   fetchLatestRelayGameState,
+  mergeRelayDetectionRegions,
   requestRelayOwnership,
   resolveExtensionVisibility,
   shouldApplyRelayGameState,
   shouldConnectToSupabaseRelay,
   shouldScheduleRelayReconnect
 } from './relayLifecycle.js';
+
+test('detection-region messages merge without clearing the current game state', () => {
+  const currentState = {
+    gameId: 123,
+    hand: ['Lightning Bolt'],
+    detectionRegions: []
+  };
+  const detectionRegions = [{ id: 'region-1', cardName: 'Lightning Bolt' }];
+
+  assert.deepEqual(
+    mergeRelayDetectionRegions(currentState, { detectionRegions }),
+    {
+      gameId: 123,
+      hand: ['Lightning Bolt'],
+      detectionRegions
+    }
+  );
+  assert.equal(mergeRelayDetectionRegions(currentState, {}), currentState);
+});
 
 test('relay subscription requires configuration, authorization, and visibility', () => {
   assert.equal(shouldConnectToSupabaseRelay({ configured: true, channelId: '1234', visible: true }), true);

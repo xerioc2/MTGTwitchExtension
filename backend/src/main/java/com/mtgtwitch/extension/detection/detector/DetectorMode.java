@@ -5,7 +5,8 @@ import java.util.Locale;
 public enum DetectorMode {
     NONE,
     MOCK,
-    MANUAL;
+    MANUAL,
+    VISION;
 
     public static DetectorMode fromConfig(String value) {
         if (value == null || value.isBlank()) {

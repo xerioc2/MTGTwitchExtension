@@ -3,6 +3,7 @@ spring:
     name: mtgo-twitch-extension-backend
 
 server:
+  address: 127.0.0.1
   port: 8080
 
 management:
@@ -34,10 +35,32 @@ screen-detections:
     enabled: ${ENABLE_SCREEN_DETECTOR:false}
     mode: ${SCREEN_DETECTOR_MODE:none}
     min-interval: ${SCREEN_DETECTOR_MIN_INTERVAL:PT1S}
+    auto-run: ${SCREEN_DETECTOR_AUTO_RUN:false}
+    scan-interval: ${SCREEN_DETECTOR_SCAN_INTERVAL:PT5S}
+    capture:
+      mode: ${SCREEN_DETECTOR_CAPTURE_MODE:none}
+      max-width: ${SCREEN_DETECTOR_MAX_WIDTH:1280}
+    calibration:
+      x: ${SCREEN_DETECTOR_CALIBRATION_X:0.0}
+      y: ${SCREEN_DETECTOR_CALIBRATION_Y:0.0}
+      w: ${SCREEN_DETECTOR_CALIBRATION_W:1.0}
+      h: ${SCREEN_DETECTOR_CALIBRATION_H:1.0}
+    obs:
+      url: ${SCREEN_DETECTOR_OBS_URL:ws://127.0.0.1:4455}
+      password: ${SCREEN_DETECTOR_OBS_PASSWORD:}
+      source-name: ${SCREEN_DETECTOR_OBS_SOURCE_NAME:}
+    opencv:
+      min-area: ${SCREEN_DETECTOR_OPENCV_MIN_AREA:0.0025}
+      max-area: ${SCREEN_DETECTOR_OPENCV_MAX_AREA:0.25}
+      max-regions: ${SCREEN_DETECTOR_OPENCV_MAX_REGIONS:20}
+    ocr:
+      enabled: ${SCREEN_DETECTOR_OCR_ENABLED:false}
+      executable: ${SCREEN_DETECTOR_OCR_EXECUTABLE:tesseract}
+    template:
+      enabled: ${SCREEN_DETECTOR_TEMPLATE_ENABLED:true}
+    min-confidence: ${SCREEN_DETECTOR_MIN_CONFIDENCE:0.72}
 
 supabase:
-  url: ${SUPABASE_URL:https://lgzmxstmqzwjbmurstye.supabase.co}
-  service-role-key: ${SUPABASE_SERVICE_ROLE_KEY:}
   channel-id: ${SUPABASE_CHANNEL_ID:}
   relay-function-url: ${SUPABASE_RELAY_FUNCTION_URL:}
   card-resolver-function-url: ${SUPABASE_CARD_RESOLVER_FUNCTION_URL:}

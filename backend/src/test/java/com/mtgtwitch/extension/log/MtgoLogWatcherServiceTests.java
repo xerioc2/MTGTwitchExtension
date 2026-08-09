@@ -67,11 +67,17 @@ class MtgoLogWatcherServiceTests {
         harness.watcher.rescan();
         assertThat(harness.broadcaster.broadcastCount()).isEqualTo(1);
 
-        Files.writeString(logPath, "Lightning Bolt is moved from hand to graveyard.\n", StandardOpenOption.APPEND);
+        Files.writeString(
+                logPath,
+                statusLine(950571148L, 287056035L, 90565) + "\n",
+                StandardOpenOption.APPEND
+        );
         invokeReadNewLines(harness.watcher, logPath);
 
         assertThat(harness.broadcaster.broadcastCount()).isEqualTo(2);
-        assertThat(harness.gameStateService.snapshot().graveyard()).contains("Lightning Bolt");
+        assertThat(harness.gameStateService.snapshot().handCards())
+                .extracting(GameCard::catalogId)
+                .containsExactly(90565);
 
         harness.watcher.stop();
     }

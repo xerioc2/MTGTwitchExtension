@@ -18,6 +18,6 @@ public class WebSocketConfig implements WebSocketConfigurer {
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
         registry.addHandler(gameStateWebSocketHandler, "/ws/game-state")
-                .setAllowedOrigins("*");
+                .setAllowedOriginPatterns(LocalBridgeWebConfig.allowedOriginPatterns());
     }
 }

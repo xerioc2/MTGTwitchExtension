@@ -104,4 +104,4 @@ The bridge is an `.exe` on the streamer's machine; many won't trust installing i
 ## Out of scope / future notes
 
 - **Extend the bridge to opponent public zones.** The log event already contains opponent cards (filtered out by `owner == localPlayerId`); their *public* zones (battlefield/GY/exile) are game-visible and likely carry `catalogId`s. Removing the filter for public zones could shrink the LLM-only surface to just genuinely-hidden info — **parked as a future enhancement**, pending confirmation of what the MTGO log actually exposes for opponent cards.
-- OBS frame source, OpenCV/OCR/template matching, and a calibration UI remain future options behind explicit opt-in detector modes (see `DetectorFutureSeams`).
+- An experimental bridge-local OBS/screenshot pipeline now implements OpenCV rectangles, known-card template matching, optional OCR, confidence reconciliation, and normalized calibration behind explicit opt-in detector settings. It remains a secondary testing path because local frames run ahead of Twitch viewer video; see [local-screen-detector.md](local-screen-detector.md).

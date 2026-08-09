@@ -7,6 +7,7 @@ import { mapToDetectionRegions, splitResolvedVisionCards } from '../regions.js';
 import { normalizeCardName, resolveCardImages } from '../scryfall.js';
 import { renderDebugHtml } from '../debug.js';
 import { extractTwitchFrame } from '../twitch.js';
+import { runSerializedLoop } from '../loop.js';
 import type { FrameInput } from '../types.js';
 
 loadLocalEnv();
@@ -34,27 +35,25 @@ if (!geminiApiKey) {
   process.exit(1);
 }
 
-const { frame, sourceLabel } = await loadFrame(frameSource);
-console.log(`frameSource=${sourceLabel}`);
 const provider = new GeminiVisionProvider({
   apiKey: geminiApiKey,
   model: process.env.GEMINI_MODEL
 });
 
-await publishOnce();
-
-if (loopSeconds !== null) {
-  setInterval(() => {
-    void publishOnce();
-  }, loopSeconds * 1000);
+if (loopSeconds === null) {
+  await publishOnce();
+} else {
+  await runSerializedLoop(publishOnce, loopSeconds * 1000);
 }
 
 async function publishOnce(): Promise<void> {
+  const { frame, sourceLabel } = await loadFrame(frameSource);
+  console.log(`frameSource=${sourceLabel}`);
   const detected = await provider.detect(frame, { knownCards });
   const resolved = await resolveCardImages(detected.cards.map((card) => card.name));
   const partitions = splitResolvedVisionCards(detected.cards, resolved);
   const resolvedCount = partitions.resolved.length;
-  await writeDebugFile(detected.cards, resolved);
+  await writeDebugFile(frame, detected.cards, resolved);
   const regions = mapToDetectionRegions(partitions.resolved, resolved, { channelId });
   const didPublish = await publishRegions(regions, { bridgeUrl, supabaseUrl, serviceRoleKey, channelId });
 
@@ -71,7 +70,7 @@ async function publishOnce(): Promise<void> {
   }
 }
 
-async function writeDebugFile(cards: Awaited<ReturnType<GeminiVisionProvider['detect']>>['cards'], resolved: Awaited<ReturnType<typeof resolveCardImages>>): Promise<void> {
+async function writeDebugFile(frame: FrameInput, cards: Awaited<ReturnType<GeminiVisionProvider['detect']>>['cards'], resolved: Awaited<ReturnType<typeof resolveCardImages>>): Promise<void> {
   if (!debugPath) {
     return;
   }

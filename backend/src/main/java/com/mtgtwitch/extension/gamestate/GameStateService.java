@@ -39,6 +39,9 @@ public class GameStateService {
 
     public synchronized GameState apply(CardZoneEvent event) {
         PerGameState state = activeState();
+        if (state.hasStructuredSnapshot) {
+            return snapshot();
+        }
         state.markUpdated(Instant.now());
 
         if (event.sourceZone() != null) {
@@ -63,6 +66,7 @@ public class GameStateService {
         state.gameId = event.gameId();
         state.matchId = event.matchId();
         state.players = List.copyOf(event.players());
+        state.hasStructuredSnapshot = true;
         state.markUpdated(Instant.now());
 
         evictFinishedGameFromSameMatch(state);
@@ -429,6 +433,7 @@ public class GameStateService {
         private List<DetectionRegion> detectionRegions = List.of();
         private List<PlayerState> players = List.of();
         private String localPlayerName;
+        private boolean hasStructuredSnapshot;
         private Instant lastUpdatedAt = Instant.now();
 
         private PerGameState(Long gameId) {

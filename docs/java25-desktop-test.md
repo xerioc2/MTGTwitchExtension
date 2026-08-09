@@ -1,13 +1,14 @@
 # MTGO Twitch Bridge Java 25 Test Kit
 
-This is an experimental Bridge 0.0.13 candidate. It uses a bundled Java 25.0.4
+This is an experimental Bridge 0.0.14 candidate. It uses a bundled Java 25.0.4
 runtime and Spring Boot 3.5.16 while keeping the application's source and
 bytecode compatibility at Java 21.
 
-The Twitch Extension frontend and GameState payload are unchanged. Testing this
-bridge does not require a new Twitch frontend upload or developer version. The
-kit still includes a freshly rebuilt `magiccontent-upload.zip` so it is complete
-enough for a separate Twitch/GitHub prerelease if desired.
+The GameState payload shape is unchanged. This kit includes a rebuilt Twitch
+frontend with the relay lifecycle and detection-event hardening, so upload it
+only to a separate Twitch Local/Hosted Test version while validating the full
+candidate. The bridge can still be tested by itself against the currently
+released frontend.
 
 ## Recommended Test Order
 
@@ -35,15 +36,18 @@ that executable.
 
 ## Files
 
-- `MTGO Twitch Bridge-0.0.13.exe`: Java 25 Windows installer candidate.
-- `MTGO-Twitch-Bridge-0.0.13-portable.zip`: uploadable portable candidate.
+- `MTGO Twitch Bridge-0.0.14.exe`: Java 25 Windows installer candidate.
+- `MTGO-Twitch-Bridge-0.0.14-portable.zip`: uploadable portable candidate.
 - `magiccontent-upload.zip`: production Twitch frontend upload, with files at
   the archive root and the Twitch Extension Helper loaded first.
+- `magiccontent-v2-screen-hover-test.zip`: optional V2-only frontend with the
+  experimental detection hitbox layer enabled.
 - `Portable/MTGO Twitch Bridge/`: extracted portable build for immediate use.
 - `Launchers/`: normal and isolated test launchers.
 - `obs/`: optional OBS auto-launch script and instructions.
 - `java25-upgrade-plan.md`: full compatibility and manual-test plan.
-- `SHA256SUMS.txt`: integrity hashes for the installer and portable zip.
+- `SHA256SUMS.txt`: integrity hashes for both frontends, the installer, and the
+  portable zip.
 
 ## Release Gate
 

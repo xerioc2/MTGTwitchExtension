@@ -5,6 +5,7 @@ import DebugPage from './DebugPage.jsx';
 import {
   disconnectSupabaseRelay,
   fetchLatestRelayGameState,
+  mergeRelayDetectionRegions,
   requestRelayOwnership,
   resolveExtensionVisibility,
   shouldApplyRelayGameState,
@@ -235,6 +236,18 @@ function ExtensionPanel({ isOverlay }) {
     return true;
   }, []);
 
+  const applyRelayDetectionRegions = useCallback((payload) => {
+    const currentRelayState = latestRelayGameStateRef.current ?? emptyGameState;
+    const nextRelayState = mergeRelayDetectionRegions(currentRelayState, payload);
+    if (nextRelayState === currentRelayState) {
+      return false;
+    }
+
+    latestRelayGameStateRef.current = nextRelayState;
+    setGameState((current) => mergeRelayDetectionRegions(current, payload));
+    return true;
+  }, []);
+
   const updateRelayOwnership = useCallback((ownsConnection) => {
     ownsRelayConnectionRef.current = ownsConnection;
     setOwnsRelayConnection(ownsConnection);
@@ -441,6 +454,19 @@ function ExtensionPanel({ isOverlay }) {
                 broadcastToSiblingSurfaces({ type: 'game-state', payload: nextGameState });
               }
             })
+            .on('broadcast', { event: 'detection-regions' }, (message) => {
+              if (disposed) {
+                return;
+              }
+
+              const nextDetectionRegions = message.payload?.payload ?? message.payload;
+              if (applyRelayDetectionRegions(nextDetectionRegions)) {
+                broadcastToSiblingSurfaces({
+                  type: 'detection-regions',
+                  payload: nextDetectionRegions
+                });
+              }
+            })
             .subscribe((status) => {
               if (disposed) {
                 return;
@@ -541,6 +567,7 @@ function ExtensionPanel({ isOverlay }) {
     };
   }, [
     activeSupabaseChannelId,
+    applyRelayDetectionRegions,
     applyRelayGameState,
     isExtensionVisible,
     ownsRelayConnection,
@@ -571,6 +598,8 @@ function ExtensionPanel({ isOverlay }) {
       relayBroadcastChannel.addEventListener('message', (event) => {
         if (event.data?.type === 'game-state') {
           applyRelayGameState(event.data.payload);
+        } else if (event.data?.type === 'detection-regions') {
+          applyRelayDetectionRegions(event.data.payload);
         } else if (event.data?.type === 'connection-state') {
           relayConnectionStateRef.current = event.data.connectionState;
           relayErrorRef.current = event.data.error ?? '';
@@ -604,7 +633,13 @@ function ExtensionPanel({ isOverlay }) {
       relayBroadcastChannelRef.current = null;
       relayBroadcastChannel?.close();
     };
-  }, [activeSupabaseChannelId, applyRelayGameState, isExtensionVisible, updateRelayOwnership]);
+  }, [
+    activeSupabaseChannelId,
+    applyRelayDetectionRegions,
+    applyRelayGameState,
+    isExtensionVisible,
+    updateRelayOwnership
+  ]);
 
   const zoneCards = useMemo(() => {
     const nextZoneCards = {};

@@ -2,6 +2,7 @@ package com.mtgtwitch.extension.detection.detector;
 
 import com.mtgtwitch.extension.detection.DetectionRegion;
 import com.mtgtwitch.extension.detection.DetectionRegionService;
+import com.mtgtwitch.extension.detection.vision.LocalVisionScreenCardDetector;
 import com.mtgtwitch.extension.gamestate.GameState;
 import com.mtgtwitch.extension.gamestate.GameStateService;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -21,6 +22,7 @@ public class ScreenDetectorPublisher {
     private final GameStateService gameStateService;
     private final MockScreenCardDetector mockDetector;
     private final ManualLayoutScreenCardDetector manualDetector;
+    private final LocalVisionScreenCardDetector visionDetector;
     private final boolean detectionsEnabled;
     private final boolean detectorEnabled;
     private final DetectorMode detectorMode;
@@ -35,6 +37,7 @@ public class ScreenDetectorPublisher {
             GameStateService gameStateService,
             MockScreenCardDetector mockDetector,
             ManualLayoutScreenCardDetector manualDetector,
+            LocalVisionScreenCardDetector visionDetector,
             @Value("${screen-detections.enabled:false}") boolean detectionsEnabled,
             @Value("${screen-detections.detector.enabled:false}") boolean detectorEnabled,
             @Value("${screen-detections.detector.mode:none}") String detectorMode,
@@ -46,6 +49,7 @@ public class ScreenDetectorPublisher {
                 gameStateService,
                 mockDetector,
                 manualDetector,
+                visionDetector,
                 detectionsEnabled,
                 detectorEnabled,
                 DetectorMode.fromConfig(detectorMode),
@@ -60,6 +64,7 @@ public class ScreenDetectorPublisher {
             GameStateService gameStateService,
             MockScreenCardDetector mockDetector,
             ManualLayoutScreenCardDetector manualDetector,
+            LocalVisionScreenCardDetector visionDetector,
             boolean detectionsEnabled,
             boolean detectorEnabled,
             DetectorMode detectorMode,
@@ -71,6 +76,7 @@ public class ScreenDetectorPublisher {
         this.gameStateService = gameStateService;
         this.mockDetector = mockDetector;
         this.manualDetector = manualDetector;
+        this.visionDetector = visionDetector;
         this.detectionsEnabled = detectionsEnabled;
         this.detectorEnabled = detectorEnabled;
         this.detectorMode = detectorMode;
@@ -107,6 +113,10 @@ public class ScreenDetectorPublisher {
     }
 
     private ScreenCardDetector detectorForMode() {
-        return detectorMode == DetectorMode.MANUAL ? manualDetector : mockDetector;
+        return switch (detectorMode) {
+            case MANUAL -> manualDetector;
+            case VISION -> visionDetector;
+            case MOCK, NONE -> mockDetector;
+        };
     }
 }

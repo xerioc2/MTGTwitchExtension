@@ -17,7 +17,6 @@ import org.springframework.web.client.RestClientException;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.Duration;
-import java.util.List;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
@@ -27,11 +26,7 @@ import java.util.concurrent.TimeUnit;
 public class SupabaseRelayPublisher {
 
     private static final Logger log = LoggerFactory.getLogger(SupabaseRelayPublisher.class);
-    private static final String GAME_STATE_EVENT = "game-state";
-
     private final RestTemplate restTemplate;
-    private final String broadcastUrl;
-    private final String serviceRoleKey;
     private final long minPublishIntervalNanos;
     private final long publishHeartbeatIntervalNanos;
     private final ScheduledExecutorService publishScheduler;
@@ -57,16 +52,12 @@ public class SupabaseRelayPublisher {
 
     public SupabaseRelayPublisher(
             RestTemplateBuilder restTemplateBuilder,
-            String supabaseUrl,
-            String serviceRoleKey,
             String channelId,
             String relayFunctionUrl,
             String bridgePublishToken
     ) {
         this(
                 restTemplateBuilder,
-                supabaseUrl,
-                serviceRoleKey,
                 channelId,
                 relayFunctionUrl,
                 bridgePublishToken,
@@ -78,8 +69,6 @@ public class SupabaseRelayPublisher {
 
     public SupabaseRelayPublisher(
             RestTemplateBuilder restTemplateBuilder,
-            String supabaseUrl,
-            String serviceRoleKey,
             String channelId,
             String relayFunctionUrl,
             String bridgePublishToken,
@@ -87,8 +76,6 @@ public class SupabaseRelayPublisher {
     ) {
         this(
                 restTemplateBuilder,
-                supabaseUrl,
-                serviceRoleKey,
                 channelId,
                 relayFunctionUrl,
                 bridgePublishToken,
@@ -100,8 +87,6 @@ public class SupabaseRelayPublisher {
 
     public SupabaseRelayPublisher(
             RestTemplateBuilder restTemplateBuilder,
-            String supabaseUrl,
-            String serviceRoleKey,
             String channelId,
             String relayFunctionUrl,
             String bridgePublishToken,
@@ -110,8 +95,6 @@ public class SupabaseRelayPublisher {
     ) {
         this(
                 restTemplateBuilder,
-                supabaseUrl,
-                serviceRoleKey,
                 channelId,
                 relayFunctionUrl,
                 bridgePublishToken,
@@ -124,8 +107,6 @@ public class SupabaseRelayPublisher {
     @Autowired
     public SupabaseRelayPublisher(
             RestTemplateBuilder restTemplateBuilder,
-            @Value("${supabase.url}") String supabaseUrl,
-            @Value("${supabase.service-role-key}") String serviceRoleKey,
             @Value("${supabase.channel-id}") String channelId,
             @Value("${supabase.relay-function-url}") String relayFunctionUrl,
             @Value("${supabase.bridge-publish-token}") String bridgePublishToken,
@@ -134,12 +115,10 @@ public class SupabaseRelayPublisher {
             @Value("${supabase.metrics-log-interval:PT5M}") Duration metricsLogInterval
     ) {
         this.restTemplate = restTemplateBuilder
-                .setConnectTimeout(Duration.ofSeconds(3))
-                .setReadTimeout(Duration.ofSeconds(3))
+                .connectTimeout(Duration.ofSeconds(3))
+                .readTimeout(Duration.ofSeconds(3))
                 .build();
-        this.broadcastUrl = supabaseUrl.replaceAll("/+$", "") + "/realtime/v1/api/broadcast";
         this.relayFunctionUrl = relayFunctionUrl;
-        this.serviceRoleKey = serviceRoleKey;
         this.bridgePublishToken = bridgePublishToken;
         this.channelId = channelId;
         this.minPublishIntervalNanos = Math.max(0, minPublishInterval.toNanos());
@@ -226,7 +205,7 @@ public class SupabaseRelayPublisher {
     }
 
     private boolean isPublishingConfigured() {
-        return StringUtils.hasText(relayFunctionUrl) || StringUtils.hasText(serviceRoleKey);
+        return StringUtils.hasText(relayFunctionUrl);
     }
 
     private synchronized void flushPendingPublish() {
@@ -245,12 +224,7 @@ public class SupabaseRelayPublisher {
 
     private boolean publishNow(GameState gameState, GameStateFingerprint content, boolean heartbeat) {
         lastPublishStartedAtNanos = System.nanoTime();
-        boolean published;
-        if (StringUtils.hasText(relayFunctionUrl)) {
-            published = publishThroughRelayFunction(gameState);
-        } else {
-            published = publishDirectly(gameState);
-        }
+        boolean published = publishThroughRelayFunction(gameState);
 
         if (published) {
             successfulPublishes += 1;
@@ -294,33 +268,6 @@ public class SupabaseRelayPublisher {
                     publishHeartbeatIntervalNanos,
                     TimeUnit.NANOSECONDS
             );
-        }
-    }
-
-    private boolean publishDirectly(GameState gameState) {
-        if (!StringUtils.hasText(serviceRoleKey)) {
-            return false;
-        }
-
-        HttpHeaders headers = new HttpHeaders();
-        headers.setContentType(MediaType.APPLICATION_JSON);
-        headers.set("apikey", serviceRoleKey);
-        headers.setBearerAuth(serviceRoleKey);
-
-        BroadcastMessage message = new BroadcastMessage(
-                "game-state:" + channelId,
-                GAME_STATE_EVENT,
-                gameState
-        );
-        BroadcastRequest request = new BroadcastRequest(List.of(message));
-
-        try {
-            restTemplate.postForEntity(broadcastUrl, new HttpEntity<>(request, headers), Void.class);
-            log.debug("Published MTGO game state to Supabase relay channel game-state:{}.", channelId);
-            return true;
-        } catch (RestClientException exception) {
-            log.warn("Failed to publish MTGO game state to Supabase relay channel game-state:{}.", channelId, exception);
-            return false;
         }
     }
 
@@ -398,12 +345,6 @@ public class SupabaseRelayPublisher {
             long failedPublishes,
             long heartbeatPublishes
     ) {
-    }
-
-    private record BroadcastRequest(List<BroadcastMessage> messages) {
-    }
-
-    private record BroadcastMessage(String topic, String event, GameState payload) {
     }
 
     private record RelayFunctionRequest(String channelId, GameState gameState) {

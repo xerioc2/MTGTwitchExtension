@@ -12,6 +12,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.builder.SpringApplicationBuilder;
 import org.springframework.context.ConfigurableApplicationContext;
+import org.springframework.core.env.MapPropertySource;
 
 import javax.swing.BorderFactory;
 import javax.swing.JButton;
@@ -113,6 +114,7 @@ public class MtgoBridgeLauncher {
     private JButton logoutButton;
     private JButton refreshButton;
     private JButton obsSetupButton;
+    private JButton detectorSettingsButton;
     private JButton stopButton;
     private JCheckBox rememberLoginCheckbox;
     private JCheckBox autostartCheckbox;
@@ -228,8 +230,8 @@ public class MtgoBridgeLauncher {
             frame.setIconImage(appIconImage);
         }
         frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
-        frame.setSize(640, 430);
-        frame.setMinimumSize(new Dimension(580, 390));
+        frame.setSize(780, 480);
+        frame.setMinimumSize(new Dimension(680, 430));
         frame.setLocationRelativeTo(null);
 
         JPanel root = new JPanel(new BorderLayout(12, 12));
@@ -272,6 +274,8 @@ public class MtgoBridgeLauncher {
         logoutButton.addActionListener(event -> logout());
         obsSetupButton = new JButton("Set up OBS auto-launch");
         obsSetupButton.addActionListener(event -> setupObsAutoLaunch());
+        detectorSettingsButton = new JButton("Detector settings");
+        detectorSettingsButton.addActionListener(event -> showDetectorSettings());
         refreshButton = new JButton("Refresh Log");
         refreshButton.addActionListener(event -> refreshLog());
         stopButton = new JButton("Stop/Close");
@@ -281,6 +285,7 @@ public class MtgoBridgeLauncher {
         actions.add(loginButton);
         actions.add(logoutButton);
         actions.add(obsSetupButton);
+        actions.add(detectorSettingsButton);
         actions.add(refreshButton);
         actions.add(stopButton);
         root.add(actions, BorderLayout.SOUTH);
@@ -371,6 +376,26 @@ public class MtgoBridgeLauncher {
         }
     }
 
+    private void showDetectorSettings() {
+        try {
+            if (DetectorSettingsDialog.show(frame, CONFIG_PATH)) {
+                JOptionPane.showMessageDialog(
+                        frame,
+                        "Detector settings saved. Restart the bridge to apply them.",
+                        WINDOW_TITLE,
+                        JOptionPane.INFORMATION_MESSAGE
+                );
+            }
+        } catch (IOException exception) {
+            JOptionPane.showMessageDialog(
+                    frame,
+                    "Could not save detector settings:\n\n" + exception.getMessage(),
+                    WINDOW_TITLE,
+                    JOptionPane.ERROR_MESSAGE
+            );
+        }
+    }
+
     private void openInExplorer(Path filePath) {
         if (filePath == null) {
             return;
@@ -436,9 +461,15 @@ public class MtgoBridgeLauncher {
         CompletableFuture.runAsync(() -> {
             try {
                 Thread.currentThread().setContextClassLoader(MtgoTwitchExtensionApplication.class.getClassLoader());
-                applicationContext = new SpringApplicationBuilder(MtgoTwitchExtensionApplication.class)
-                        .headless(false)
-                        .run(args);
+                SpringApplicationBuilder builder = new SpringApplicationBuilder(MtgoTwitchExtensionApplication.class)
+                        .headless(false);
+                Map<String, Object> detectorProperties = DetectorLocalSettings.load(CONFIG_PATH).springProperties();
+                if (!detectorProperties.isEmpty()) {
+                    builder.initializers(context -> context.getEnvironment().getPropertySources().addFirst(
+                            new MapPropertySource("desktopDetectorSettings", detectorProperties)
+                    ));
+                }
+                applicationContext = builder.run(args);
                 recordBoundPort();
                 applyBridgeConfigIfPresent();
                 registerShutdownHook();
@@ -1149,6 +1180,9 @@ public class MtgoBridgeLauncher {
         }
         if (obsSetupButton != null) {
             obsSetupButton.setEnabled(enabled);
+        }
+        if (detectorSettingsButton != null) {
+            detectorSettingsButton.setEnabled(enabled);
         }
         if (addAccountButton != null) {
             addAccountButton.setEnabled(enabled);

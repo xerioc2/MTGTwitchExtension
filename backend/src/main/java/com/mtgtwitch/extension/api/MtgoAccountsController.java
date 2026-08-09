@@ -2,7 +2,6 @@ package com.mtgtwitch.extension.api;
 
 import com.mtgtwitch.extension.desktop.MtgoAccountPreferences;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -14,7 +13,6 @@ import java.util.List;
 
 @RestController
 @RequestMapping("/api")
-@CrossOrigin(origins = "*")
 public class MtgoAccountsController {
 
     private final MtgoAccountPreferences mtgoAccountPreferences;
