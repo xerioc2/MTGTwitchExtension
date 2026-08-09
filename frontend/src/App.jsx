@@ -1,4 +1,4 @@
-import { Activity, BookOpen, ChevronDown, ChevronRight, CircleAlert, PanelRightClose, PanelRightOpen, RefreshCw } from 'lucide-react';
+import { Activity, BookOpen, ChevronDown, ChevronRight, CircleAlert, Download, PanelRightClose, PanelRightOpen, RefreshCw } from 'lucide-react';
 import { createClient } from '@supabase/supabase-js';
 import { Component, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import DebugPage from './DebugPage.jsx';
@@ -931,6 +931,29 @@ function ExtensionPanel({ isOverlay }) {
     }
   }
 
+  function handleSaveDeckExport() {
+    if (!deckExportText) {
+      return;
+    }
+
+    try {
+      const file = new Blob([deckExportText], { type: 'text/plain;charset=utf-8' });
+      const downloadUrl = URL.createObjectURL(file);
+      const download = document.createElement('a');
+      const gameSuffix = gameState.gameId ? `-${gameState.gameId}` : '';
+      download.href = downloadUrl;
+      download.download = `magiccontent-deck${gameSuffix}.txt`;
+      download.style.display = 'none';
+      document.body.appendChild(download);
+      download.click();
+      download.remove();
+      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 0);
+      setDeckExportCopyStatus('Download started');
+    } catch {
+      setDeckExportCopyStatus('Download failed');
+    }
+  }
+
   function toggleZone(zoneKey) {
     setCollapsedZones((current) => ({
       ...current,
@@ -1327,6 +1350,7 @@ function ExtensionPanel({ isOverlay }) {
           isResolving={isDeckExportResolving}
           copyStatus={deckExportCopyStatus}
           onCopy={handleCopyDeckExport}
+          onSave={handleSaveDeckExport}
           onClose={() => {
             setShowDeckExport(false);
             setDeckExportCopyStatus('');
@@ -1534,7 +1558,7 @@ function DecklistSection({ label, count, groups, onCardHover, onCardLeave, onCar
   );
 }
 
-function DeckExportPanel({ deckText, isResolving, copyStatus, onCopy, onClose }) {
+function DeckExportPanel({ deckText, isResolving, copyStatus, onCopy, onSave, onClose }) {
   return (
     <div className="extension-modal-backdrop">
       <section className="extension-deck-export" aria-labelledby="extension-deck-export-title">
@@ -1558,6 +1582,10 @@ function DeckExportPanel({ deckText, isResolving, copyStatus, onCopy, onClose })
         <div className="extension-deck-export-actions">
           <button className="extension-icon-button" type="button" onClick={onCopy} disabled={!deckText}>
             <span>Copy to clipboard</span>
+          </button>
+          <button className="extension-icon-button" type="button" onClick={onSave} disabled={!deckText}>
+            <Download aria-hidden="true" size={14} />
+            <span>Save .txt</span>
           </button>
           <a className="extension-deck-export-link" href={manaPoolDeckUrl()} target="_blank" rel="noreferrer">
             Open in ManaPool
