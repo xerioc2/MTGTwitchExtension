@@ -943,8 +943,7 @@ function ExtensionPanel({ isOverlay }) {
         return;
       }
 
-      const file = new Blob([deckExportText], { type: 'text/plain;charset=utf-8' });
-      const downloadUrl = URL.createObjectURL(file);
+      const downloadUrl = `data:text/plain;charset=utf-8,${encodeURIComponent(deckExportText)}`;
       const gameSuffix = gameState.gameId ? `-${gameState.gameId}` : '';
       const filename = `magiccontent-deck${gameSuffix}.txt`;
       const style = saveWindow.document.createElement('style');
@@ -974,7 +973,6 @@ function ExtensionPanel({ isOverlay }) {
       saveWindow.opener = null;
       download.click();
 
-      window.setTimeout(() => URL.revokeObjectURL(downloadUrl), 60_000);
       setDeckExportCopyStatus('Save window opened');
     } catch {
       setDeckExportCopyStatus('Download failed');
